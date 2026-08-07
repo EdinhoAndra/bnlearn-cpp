@@ -12,7 +12,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-from pgmpy.estimators import ExhaustiveSearch, HillClimbSearch, TreeSearch
+from pgmpy.estimators import ExhaustiveSearch, TreeSearch
 try:
     from pgmpy.estimators import StructureScore
 except ImportError:
@@ -30,6 +30,8 @@ else:
     from pgmpy.estimators import ConstraintBasedEstimator
 
 import bnlearn
+from bnlearn.accelerated_scores import get_accelerated_score
+from bnlearn.parallel_hill_climb import ParallelHillClimbSearch
 
 
 # %% Gaussian scoring methods
@@ -133,6 +135,8 @@ def fit(df,
         params_pc = {'ci_test': 'chi_square', 'alpha': 0.05},
         n_jobs=-1,
         verbose=3,
+        compute_backend='numpy',
+        min_gpu_rows=50000,
         ):
     """Structure learning fit model.
 
@@ -226,6 +230,13 @@ def fit(df,
     params_pc : dict: {'ci_test': 'chi_square', 'alpha': 0.05}
         * 'ci_test': 'chi_square', 'pearsonr', 'g_sq', 'log_likelihood', 'freeman_tuckey', 'modified_log_likelihood', 'neyman', 'cressie_read', 'power_divergence'
         * 'alpha': 0.05
+    compute_backend : str, (default : 'numpy')
+        Numerical backend for discrete structure scores: 'numpy', 'cupy', or
+        'auto'. The 'auto' option uses CuPy only when a CUDA device is available
+        and the dataset has at least `min_gpu_rows` rows.
+    min_gpu_rows : int, (default : 50000)
+        Minimum dataset size at which `compute_backend='auto'` attempts to use
+        CuPy. Explicit `compute_backend='cupy'` always requests the GPU.
     verbose : int, (default : 3)
         0: None, 1: Error,  2: Warning, 3: Info (default), 4: Debug, 5: Trace
 
@@ -303,7 +314,7 @@ def fit(df,
 
     out = []
     # Set config
-    config = {'method': methodtype, 'scoring': scoretype, 'black_list': black_list, 'white_list': white_list, 'bw_list_method': bw_list_method, 'start_dag': start_dag, 'max_indegree': max_indegree, 'tabu_length': tabu_length, 'epsilon': epsilon, 'max_iter': max_iter, 'root_node': root_node, 'class_node': class_node, 'fixed_edges': fixed_edges, 'return_all_dags': return_all_dags, 'n_jobs': n_jobs, 'verbose': verbose}
+    config = {'method': methodtype, 'scoring': scoretype, 'black_list': black_list, 'white_list': white_list, 'bw_list_method': bw_list_method, 'start_dag': start_dag, 'max_indegree': max_indegree, 'tabu_length': tabu_length, 'epsilon': epsilon, 'max_iter': max_iter, 'root_node': root_node, 'class_node': class_node, 'fixed_edges': fixed_edges, 'return_all_dags': return_all_dags, 'n_jobs': n_jobs, 'verbose': verbose, 'compute_backend': compute_backend, 'min_gpu_rows': min_gpu_rows}
     # Make some checks
     config = _make_checks(df, config, verbose=verbose)
     # Make sure columns are of type string
@@ -329,6 +340,8 @@ def fit(df,
                                 scoretype=config['scoring'],
                                 return_all_dags=config['return_all_dags'],
                                 n_jobs=config['n_jobs'],
+                                compute_backend=config['compute_backend'],
+                                min_gpu_rows=config['min_gpu_rows'],
                                 verbose=config['verbose'])
 
     # HillClimbSearch
@@ -345,6 +358,8 @@ def fit(df,
                                max_iter=config['max_iter'],
                                fixed_edges=config['fixed_edges'],
                                n_jobs=config['n_jobs'],
+                               compute_backend=config['compute_backend'],
+                               min_gpu_rows=config['min_gpu_rows'],
                                verbose=config['verbose'],
                                )
 
@@ -373,7 +388,13 @@ def fit(df,
     out['model_edges'] = list(out['model'].edges())
     out['adjmat'] = bnlearn.dag2adjmat(out['model'])
     out['config'] = config
-    out['structure_scores'] = bnlearn.structure_scores(out, df, verbose=verbose)
+    out['structure_scores'] = bnlearn.structure_scores(
+        out,
+        df,
+        verbose=verbose,
+        compute_backend=config['compute_backend'],
+        min_gpu_rows=config['min_gpu_rows'],
+    )
 
     # return
     return out
@@ -384,6 +405,8 @@ def _make_checks(df, config, verbose=3):
     assert isinstance(pd.DataFrame(), type(df)), 'df must be of type pd.DataFrame()'
     if not np.isin(config['scoring'], ['bic', 'k2', 'bdeu', 'bds', 'aic', 'loglik-g', 'aic-g', 'bic-g']): raise Exception('"scoretype=%s" is invalid.' %(config['scoring']))
     if not np.isin(config['method'], ['ica-lingam', 'direct-lingam', 'naivebayes', 'nb', 'tan', 'cl', 'chow-liu', 'hc', 'ex', 'cs', 'pc', 'exhaustivesearch', 'hillclimbsearch', 'constraintsearch']): raise Exception('"methodtype=%s" is invalid.' %(config['method']))
+    if config['compute_backend'] not in ['numpy', 'cupy', 'auto']: raise Exception('"compute_backend=%s" is invalid.' %(config['compute_backend']))
+    if not isinstance(config['min_gpu_rows'], int) or config['min_gpu_rows'] < 0: raise Exception('"min_gpu_rows=%s" is invalid.' %(config['min_gpu_rows']))
 
     if isinstance(config['white_list'], str):
         config['white_list'] = [config['white_list']]
@@ -596,6 +619,8 @@ def _hillclimbsearch(df,
                      bw_list_method='edges', 
                      fixed_edges=set(), 
                      n_jobs=-1, 
+                     compute_backend='numpy',
+                     min_gpu_rows=50000,
                      verbose=3):
     """Heuristic hill climb searches for DAGs, to learn network structure from data. `estimate` attempts to find a model with optimal score.
 
@@ -620,7 +645,6 @@ def _hillclimbsearch(df,
 
     """
     out = {}
-    if verbose >= 4 and n_jobs > 0: print('[bnlearn] >n_jobs is not supported for [hillclimbsearch]')
     if isinstance(start_dag, dict) and start_dag.get('model', None) is not None:
         start_dag = start_dag['model']
     if start_dag is not None and not 'bayesiannetwork' in str(type(start_dag)).lower():
@@ -630,9 +654,19 @@ def _hillclimbsearch(df,
         if verbose >= 3: print('[bnlearn] >start_dag is set.')
 
     # Set scoring type
-    scoring_method = _SetScoringType(df, scoretype, verbose=verbose)
-    # Set search algorithm
-    model = HillClimbSearch(df)
+    scoring_method = _SetScoringType(
+        df,
+        scoretype,
+        verbose=verbose,
+        compute_backend=compute_backend,
+        min_gpu_rows=min_gpu_rows,
+    )
+    # Use CPU threads for independent candidate scores. CuPy already schedules
+    # work on the GPU and is faster without competing host threads.
+    effective_n_jobs = 1 if getattr(scoring_method, 'resolved_backend_', 'numpy') == 'cupy' else n_jobs
+    if verbose >= 4 and effective_n_jobs != n_jobs:
+        print('[bnlearn] >Using n_jobs=1 with the CuPy backend to avoid GPU contention.')
+    model = ParallelHillClimbSearch(df, n_jobs=effective_n_jobs)
 
     # Compute best DAG
     if bw_list_method=='edges':
@@ -654,7 +688,15 @@ def _hillclimbsearch(df,
 
 
 # %% ExhaustiveSearch
-def _exhaustivesearch(df, scoretype='bic', return_all_dags=False, n_jobs=-1, verbose=3):
+def _exhaustivesearch(
+    df,
+    scoretype='bic',
+    return_all_dags=False,
+    n_jobs=-1,
+    compute_backend='numpy',
+    min_gpu_rows=50000,
+    verbose=3,
+):
     """Exhaustivesearch.
 
     Description
@@ -689,7 +731,13 @@ def _exhaustivesearch(df, scoretype='bic', return_all_dags=False, n_jobs=-1, ver
 
     out = {}
     # Set scoring type
-    scoring_method = _SetScoringType(df, scoretype, verbose=verbose)
+    scoring_method = _SetScoringType(
+        df,
+        scoretype,
+        verbose=verbose,
+        compute_backend=compute_backend,
+        min_gpu_rows=min_gpu_rows,
+    )
     # Exhaustive search across all dags
     model = ExhaustiveSearch(df, scoring_method=scoring_method)
     # Compute best DAG
@@ -717,7 +765,14 @@ def _exhaustivesearch(df, scoretype='bic', return_all_dags=False, n_jobs=-1, ver
 
 
 # %% Set scoring type
-def _SetScoringType(df, scoretype, verbose=3, **kwargs):
+def _SetScoringType(
+    df,
+    scoretype,
+    verbose=3,
+    compute_backend='numpy',
+    min_gpu_rows=50000,
+    **kwargs,
+):
     """Set scoring function.
 
     Parameters
@@ -750,16 +805,16 @@ def _SetScoringType(df, scoretype, verbose=3, **kwargs):
     """
     if verbose>=3: print('[bnlearn] >Set scoring type at [%s]' %(scoretype))
 
-    if scoretype=='bic':
-        scoring_method = pgmpy.estimators.BicScore(df)
-    elif scoretype=='k2':
-        scoring_method = pgmpy.estimators.K2Score(df)
-    elif scoretype=='bdeu':
-        scoring_method = pgmpy.estimators.BDeuScore(df, equivalent_sample_size=5)
-    elif scoretype=='bds':
-        scoring_method = pgmpy.estimators.BDsScore(df, equivalent_sample_size=5)
-    elif scoretype=='aic':
-        scoring_method = pgmpy.estimators.AICScore(df)
+    if scoretype in ['bic', 'k2', 'bdeu', 'bds', 'aic']:
+        equivalent_sample_size = kwargs.pop('equivalent_sample_size', 5)
+        scoring_method = get_accelerated_score(
+            df,
+            scoretype,
+            compute_backend=compute_backend,
+            min_gpu_rows=min_gpu_rows,
+            equivalent_sample_size=equivalent_sample_size,
+            **kwargs,
+        )
     elif scoretype=='loglik-g':
         scoring_method = LogLikelihoodGauss(df, **kwargs)
     elif scoretype=='aic-g':
