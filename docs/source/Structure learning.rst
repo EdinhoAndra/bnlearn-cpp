@@ -78,6 +78,34 @@ Each approach can be scored using the following scoretypes:
     * k2
     * bdeu
 
+GPU acceleration and CPU parallelism
+====================================
+
+The discrete ``bic``, ``k2``, ``bdeu``, ``bds``, and ``aic`` scores support
+vectorized NumPy and CuPy backends. Install the CUDA 12 extra when using a GPU:
+
+.. code-block:: bash
+
+    pip install "bnlearn[gpu-cu12]"
+
+Use ``compute_backend='auto'`` for a safe GPU selection with automatic NumPy
+fallback, or ``compute_backend='cupy'`` to require CUDA explicitly:
+
+.. code-block:: python
+
+    model = bn.structure_learning.fit(
+        df,
+        methodtype='hc',
+        scoretype='bic',
+        compute_backend='auto',
+        min_gpu_rows=50_000,
+        n_jobs=-1,
+    )
+
+Hill Climb candidate scores use ``n_jobs`` CPU threads with the NumPy backend.
+The CuPy backend uses one host thread so that CUDA kernels are scheduled without
+thread contention.
+
 Exhaustivesearch
 ===================
 

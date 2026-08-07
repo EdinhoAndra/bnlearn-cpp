@@ -26,7 +26,6 @@ from collections import defaultdict
 from pgmpy.models import BayesianNetwork, NaiveBayes, MarkovNetwork
 from pgmpy.models import DynamicBayesianNetwork as DBN
 from pgmpy.factors.discrete import TabularCPD
-from pgmpy.metrics import structure_score
 
 from setgraphviz import setgraphviz
 from ismember import ismember
@@ -2174,7 +2173,7 @@ def structure_scores(model, df, scoring_method=['k2', 'bic', 'bdeu', 'bds'], ver
     gaussian_scores = ['loglik-g', 'aic-g', 'bic-g']
     if selected_score in gaussian_scores and not np.any(np.isin(scoring_method, gaussian_scores)):
         scoring_method = [selected_score]
-    if verbose>=3: print('[bnlearn] >Compute structure scores for model comparison (higher is better).' %(scoring_method))
+    if verbose>=3: print('[bnlearn] >Compute structure scores for model comparison (higher is better).')
 
     # Return if method not supported
     if np.any(np.isin(method, ['cs', 'constraintsearch'])):
@@ -2191,11 +2190,8 @@ def structure_scores(model, df, scoring_method=['k2', 'bic', 'bdeu', 'bds'], ver
     if model is not None:
         for s in scoring_method:
             try:
-                if s in gaussian_scores:
-                    scoring_object = bnlearn.structure_learning._SetScoringType(df, s, verbose=0, **kwargs)
-                    scores[s] = scoring_object.score(model)
-                else:
-                    scores[s] = structure_score(model, df, scoring_method=s)
+                scoring_object = bnlearn.structure_learning._SetScoringType(df, s, verbose=0, **kwargs)
+                scores[s] = scoring_object.score(model)
             except (ValueError, TypeError, np.linalg.LinAlgError) as e:
                 if verbose>=2 and show_message:
                     print(f'[bnlearn] >WARNING> {e}')
