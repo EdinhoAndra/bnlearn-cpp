@@ -12,40 +12,28 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-from pgmpy.estimators import ExhaustiveSearch, TreeSearch
-try:
-    from pgmpy.estimators import StructureScore
-except ImportError:
-    # Compatibility with older pgmpy releases.
-    from pgmpy.estimators.StructureScore import StructureScore
+from pgmpy.estimators import ExhaustiveSearch
+from pgmpy.base import DAG
+from pgmpy.causal_discovery import ChowLiu, ExpertKnowledge, HillClimbSearch, PC, TAN
+from pgmpy.ci_tests import ChiSquare, GSq, LogLikelihood, ModifiedLogLikelihood, PowerDivergence
 from pgmpy.models import NaiveBayes
+from pgmpy.structure_score import (
+    AIC,
+    BaseStructureScore,
+    BDeu,
+    BDs,
+    BIC,
+    K2,
+)
 
 import lingam
 
-import pgmpy
-from packaging import version
-if version.parse(pgmpy.__version__)>=version.parse("0.1.13"):
-    from pgmpy.estimators import PC as ConstraintBasedEstimator
-else:
-    from pgmpy.estimators import ConstraintBasedEstimator
-
 import bnlearn
-from bnlearn.accelerated_scores import get_accelerated_score
-from bnlearn.parallel_hill_climb import ParallelHillClimbSearch
 
 
 # %% Gaussian scoring methods
-class LogLikelihoodGauss(StructureScore):
-    """Multivariate Gaussian log-likelihood score for continuous data.
-
-    Each node is modelled by a linear Gaussian regression on its parents. The
-    total DAG score is decomposable into the sum of the local node scores, which
-    makes this class compatible with pgmpy's HillClimbSearch and ExhaustiveSearch.
-
-    Notes
-    -----
-    Higher scores are better. Missing and infinite values are not supported.
-    """
+class LogLikelihoodGauss(BaseStructureScore):
+    """Multivariate Gaussian log-likelihood score for continuous data."""
 
     def __init__(self, data, variance_floor=1e-12, **kwargs):
         if not isinstance(data, pd.DataFrame):
@@ -60,7 +48,6 @@ class LogLikelihoodGauss(StructureScore):
         values = data.to_numpy(dtype=float, copy=False)
         if not np.all(np.isfinite(values)):
             raise ValueError('[bnlearn] >Gaussian scores do not support missing or infinite values.')
-
         if variance_floor <= 0:
             raise ValueError('[bnlearn] >variance_floor must be larger than zero.')
 
@@ -76,7 +63,6 @@ class LogLikelihoodGauss(StructureScore):
 
         y = self.data[variable].to_numpy(dtype=float, copy=False)
         n_samples = y.shape[0]
-
         if len(parents) == 0:
             residuals = y - np.mean(y)
         else:
@@ -92,26 +78,23 @@ class LogLikelihoodGauss(StructureScore):
         self._gaussian_score_cache[cache_key] = score
         return score
 
-    def local_score(self, variable, parents):
-        """Return the local Gaussian log-likelihood for one node family."""
+    def _local_score(self, variable, parents):
         return self._local_log_likelihood(variable, parents)
 
 
 class AICGauss(LogLikelihoodGauss):
     """Gaussian AIC score using the higher-is-better convention."""
 
-    def local_score(self, variable, parents):
-        parents = tuple(parents)
-        n_parameters = len(parents) + 2  # intercept, coefficients, variance
+    def _local_score(self, variable, parents):
+        n_parameters = len(parents) + 2
         return self._local_log_likelihood(variable, parents) - n_parameters
 
 
 class BICGauss(LogLikelihoodGauss):
     """Gaussian BIC score using the higher-is-better convention."""
 
-    def local_score(self, variable, parents):
-        parents = tuple(parents)
-        n_parameters = len(parents) + 2  # intercept, coefficients, variance
+    def _local_score(self, variable, parents):
+        n_parameters = len(parents) + 2
         return self._local_log_likelihood(variable, parents) - 0.5 * n_parameters * np.log(self.data.shape[0])
 
 
@@ -418,7 +401,7 @@ def _make_checks(df, config, verbose=3):
     if (config['black_list'] is not None) and len(config['black_list'])==0:
         config['black_list'] = None
 
-    if (config['method']!='hc') and (config['bw_list_method']=='edges'): raise Exception('[bnlearn] >The "bw_list_method=%s" does not work with "methodtype=%s"' %(config['bw_list_method'], config['method']))
+    if (config['method'] not in ['hc', 'hillclimbsearch']) and (config['bw_list_method']=='edges'): raise Exception('[bnlearn] >The "bw_list_method=%s" does not work with "methodtype=%s"' %(config['bw_list_method'], config['method']))
     if (config['method']=='tan') and (config['class_node'] is None): raise Exception('[bnlearn] >The treeSearch method TAN requires setting the <class_node> parameter: "%s"' %(str(config['class_node'])))
     if ((config['method']=='nb') | (config['method']=='naivebayes')) and (config['root_node'] is None): raise Exception('[bnlearn] >The <%s> method requires setting the "root_node" parameter: "%s"' %(config['method'], str(config['class_node'])))
 
@@ -441,7 +424,7 @@ def _make_checks(df, config, verbose=3):
         raise Exception('[bnlearn] >Error: The use of black_list or white_list requires setting bw_list_method.')
     if df.shape[1]>10 and df.shape[1]<15:
         if verbose>=2: print('[bnlearn] >Warning: Computing DAG with %d nodes can take a very long time!' %(df.shape[1]))
-    if (config['max_indegree'] is not None) and config['method']!='hc':
+    if (config['max_indegree'] is not None) and config['method'] not in ['hc', 'hillclimbsearch']:
         if verbose>=2: print('[bnlearn] >Warning: max_indegree only works in case of methodtype="hc"')
     if (config['class_node'] is not None) and config['method']!='tan':
         if verbose>=2: print('[bnlearn] >Warning: max_indegree only works in case of methodtype="tan"')
@@ -530,8 +513,13 @@ def _treesearch(df, estimator_type, root_node, class_node=None, n_jobs=-1, verbo
 
     """
     out={}
-    est = TreeSearch(df, root_node=root_node, n_jobs=n_jobs)
-    model = est.estimate(estimator_type=estimator_type, class_node=class_node)
+    if estimator_type == 'chow-liu':
+        est = ChowLiu(root_node=root_node, n_jobs=n_jobs, show_progress=False)
+    elif estimator_type == 'tan':
+        est = TAN(class_node=class_node, root_node=root_node, n_jobs=n_jobs, show_progress=False)
+    else:
+        raise ValueError('[bnlearn] >Unknown tree-search method: %s' % estimator_type)
+    model = est.fit(df).causal_graph_
 
     # Store
     out['model']=model
@@ -576,17 +564,30 @@ def _constraintsearch(df, significance_level=0.05, ci_test='chi_square', n_jobs=
         "power_divergence"
 
     """
-    if verbose>=4 and n_jobs>0: print('[bnlearn] >n_jobs is not supported for [constraintsearch]')
     if verbose>=3: print(f'[bnlearn] >Build skeleton with [{ci_test}] and alpha={significance_level}')
     out = {}
-    # Set search algorithm
-    model = ConstraintBasedEstimator(df)
-
-    # Estimate using chi_square
-    skel, seperating_sets = model.build_skeleton(significance_level=significance_level, ci_test=ci_test)
+    ci_test_factories = {
+        'chi_square': lambda: ChiSquare(df),
+        'g_sq': lambda: GSq(df),
+        'log_likelihood': lambda: LogLikelihood(df),
+        'modified_log_likelihood': lambda: ModifiedLogLikelihood(df),
+        'freeman_tuckey': lambda: PowerDivergence(df, lambda_='freeman-tuckey'),
+        'neyman': lambda: PowerDivergence(df, lambda_='neyman'),
+        'cressie_read': lambda: PowerDivergence(df, lambda_='cressie-read'),
+    }
+    resolved_ci_test = ci_test_factories[ci_test]() if ci_test in ci_test_factories else ci_test
+    estimator = PC(
+        variant='parallel',
+        ci_test=resolved_ci_test,
+        return_type='pdag',
+        significance_level=significance_level,
+        n_jobs=n_jobs,
+        show_progress=False,
+    ).fit(df)
+    skel = estimator.skeleton_
+    pdag = estimator.causal_graph_
 
     if verbose>=4: print("Undirected edges: ", skel.edges())
-    pdag = model.skeleton_to_pdag(skel, seperating_sets)
     if verbose>=4: print("PDAG edges: ", pdag.edges())
     dag = pdag.to_dag()
     if verbose>=4: print("DAG edges: ", dag.edges())
@@ -598,11 +599,9 @@ def _constraintsearch(df, significance_level=0.05, ci_test='chi_square', n_jobs=
     out['dag'] = dag
     out['dag_edges'] = dag.edges()
 
-    # Search using "estimate()" method provides a shorthand for the three steps above and directly returns a "BayesianNetwork"
-    best_model = model.estimate(significance_level=significance_level)
-    out['model'] = best_model
+    out['model'] = dag
 
-    if verbose>=4: print(best_model.edges())
+    if verbose>=4: print(dag.edges())
     return out
 
 
@@ -617,7 +616,7 @@ def _hillclimbsearch(df,
                      epsilon=1e-4, 
                      max_iter=1e6, 
                      bw_list_method='edges', 
-                     fixed_edges=set(), 
+                     fixed_edges=None,
                      n_jobs=-1, 
                      compute_backend='numpy',
                      min_gpu_rows=50000,
@@ -647,11 +646,44 @@ def _hillclimbsearch(df,
     out = {}
     if isinstance(start_dag, dict) and start_dag.get('model', None) is not None:
         start_dag = start_dag['model']
-    if start_dag is not None and not 'bayesiannetwork' in str(type(start_dag)).lower():
-        if verbose >= 3: print('[bnlearn] >WARNING: start_dag is invalid. No DAG found of type BayesianNetwork. start_dag is set to None.')
+    if start_dag is not None and not isinstance(start_dag, DAG):
+        if verbose >= 3: print('[bnlearn] >WARNING: start_dag is invalid. No pgmpy DAG found. start_dag is set to None.')
         start_dag = None
-    if start_dag is not None and 'bayesiannetwork' in str(type(start_dag)).lower():
+    if start_dag is not None:
         if verbose >= 3: print('[bnlearn] >start_dag is set.')
+
+    def _edge_set(name, edges):
+        if edges is None:
+            return set()
+        try:
+            normalized = set()
+            for edge in edges:
+                if isinstance(edge, (str, bytes)):
+                    raise TypeError
+                normalized.add(tuple(edge))
+        except TypeError as error:
+            raise ValueError('[bnlearn] >%s must contain directed edge pairs.' % name) from error
+        if any(len(edge) != 2 for edge in normalized):
+            raise ValueError('[bnlearn] >%s must contain directed edge pairs.' % name)
+        unknown_nodes = set().union(*map(set, normalized)) - set(df.columns) if normalized else set()
+        if unknown_nodes:
+            raise ValueError('[bnlearn] >%s contains nodes not present in df: %s' % (name, sorted(unknown_nodes, key=str)))
+        return normalized
+
+    edge_constraints = bw_list_method == 'edges'
+    forbidden_edges = _edge_set('black_list', black_list) if edge_constraints else set()
+    search_space = _edge_set('white_list', white_list) if edge_constraints else set()
+    required_edges = _edge_set('fixed_edges', fixed_edges)
+    if required_edges & forbidden_edges:
+        raise ValueError('[bnlearn] >fixed_edges cannot also be present in black_list.')
+    if edge_constraints and white_list is not None and not required_edges.issubset(search_space):
+        raise ValueError('[bnlearn] >fixed_edges must be included in white_list when a white_list is provided.')
+
+    expert_knowledge = ExpertKnowledge(
+        forbidden_edges=forbidden_edges,
+        required_edges=required_edges,
+        search_space=search_space if edge_constraints and white_list is not None else None,
+    )
 
     # Set scoring type
     scoring_method = _SetScoringType(
@@ -666,17 +698,22 @@ def _hillclimbsearch(df,
     effective_n_jobs = 1 if getattr(scoring_method, 'resolved_backend_', 'numpy') == 'cupy' else n_jobs
     if verbose >= 4 and effective_n_jobs != n_jobs:
         print('[bnlearn] >Using n_jobs=1 with the CuPy backend to avoid GPU contention.')
-    model = ParallelHillClimbSearch(df, n_jobs=effective_n_jobs)
+    if bw_list_method == 'edges' and ((black_list is not None) or (white_list is not None)):
+        if verbose >= 3: print('[bnlearn] >Filter edges based on black_list/white_list')
 
-    # Compute best DAG
-    if bw_list_method=='edges':
-        if (black_list is not None) or (white_list is not None):
-            if verbose >= 3: print('[bnlearn] >Filter edges based on black_list/white_list')
-        # best_model = model.estimate()
-        best_model = model.estimate(scoring_method=scoring_method, start_dag=start_dag, max_indegree=max_indegree, tabu_length=tabu_length, epsilon=epsilon, max_iter=max_iter, black_list=black_list, white_list=white_list, fixed_edges=fixed_edges, show_progress=False)
-    else:
-        # At this point, variables are readily filtered based on bw_list_method or not (if nothing defined).
-        best_model = model.estimate(scoring_method=scoring_method, start_dag=start_dag, max_indegree=max_indegree, tabu_length=tabu_length, epsilon=epsilon, max_iter=max_iter, fixed_edges=fixed_edges, show_progress=False)
+    estimator = HillClimbSearch(
+        scoring_method=scoring_method,
+        start_dag=start_dag,
+        max_indegree=max_indegree,
+        tabu_length=tabu_length,
+        expert_knowledge=expert_knowledge,
+        return_type='dag',
+        epsilon=epsilon,
+        max_iter=int(max_iter),
+        show_progress=False,
+        n_jobs=effective_n_jobs,
+    ).fit(df)
+    best_model = estimator.causal_graph_
 
     # Ensure isolated variables are retained in sparse or empty DAGs.
     best_model.add_nodes_from(df.columns)
@@ -806,13 +843,19 @@ def _SetScoringType(
     if verbose>=3: print('[bnlearn] >Set scoring type at [%s]' %(scoretype))
 
     if scoretype in ['bic', 'k2', 'bdeu', 'bds', 'aic']:
-        equivalent_sample_size = kwargs.pop('equivalent_sample_size', 5)
-        scoring_method = get_accelerated_score(
+        score_classes = {
+            'bic': BIC,
+            'k2': K2,
+            'bdeu': BDeu,
+            'bds': BDs,
+            'aic': AIC,
+        }
+        if scoretype in ['bdeu', 'bds']:
+            kwargs['equivalent_sample_size'] = kwargs.pop('equivalent_sample_size', 10)
+        scoring_method = score_classes[scoretype](
             df,
-            scoretype,
             compute_backend=compute_backend,
             min_gpu_rows=min_gpu_rows,
-            equivalent_sample_size=equivalent_sample_size,
             **kwargs,
         )
     elif scoretype=='loglik-g':

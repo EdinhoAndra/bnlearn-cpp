@@ -1,8 +1,11 @@
 Black and white lists
 ========================
 
-Input variablescan be black or white listed in the model.
-When variables are black listed, they are excluded from the search and the resulting model will not contain any of those edges. If variables are white listed, the search is limited to only those edges. The resulting model will then only contain edges that are in white_list.
+Nodes or directed edges can be black- or white-listed. With
+``bw_list_method='nodes'``, node names filter the dataframe before structure
+learning. With ``bw_list_method='edges'``, each list item must be a directed
+``(source, target)`` pair. A white edge list defines the complete search space;
+a black edge list identifies forbidden edges.
 
 **White list example**
 
@@ -18,8 +21,19 @@ When variables are black listed, they are excluded from the search and the resul
     # Structure learning by including only 'Survived','Pclass','Sex','Embarked','Parch'.
     DAG_nodes = bnlearn.structure_learning.fit(dfnum, methodtype='hc', bw_list_method='nodes', white_list=['Survived','Pclass','Sex','Embarked','Parch'])
 
-    # Structure learning by enforcing variables 'Survived','Pclass','Sex','Embarked','Parch'.
-    DAG_edges = bnlearn.structure_learning.fit(dfnum, methodtype='hc', bw_list_method='edges', white_list=['Survived','Pclass','Sex','Embarked','Parch'])
+    # Limit the search to these directed edges.
+    allowed_edges = [
+        ('Pclass', 'Survived'),
+        ('Sex', 'Survived'),
+        ('Embarked', 'Survived'),
+        ('Parch', 'Survived'),
+    ]
+    DAG_edges = bnlearn.structure_learning.fit(
+        dfnum,
+        methodtype='hc',
+        bw_list_method='edges',
+        white_list=allowed_edges,
+    )
 
     # Plot
     Gf = bnlearn.plot(DAG_nodes)
@@ -41,8 +55,19 @@ When variables are black listed, they are excluded from the search and the resul
     # Structure learning after removing 'Survived','Pclass','Sex','Embarked','Parch'.
     DAG_nodes = bnlearn.structure_learning.fit(dfnum, methodtype='hc', bw_list_method='nodes', black_list=['Survived','Pclass','Sex','Embarked','Parch'])
 
-    # Structure learning by enforcing variables 'Survived','Pclass','Sex','Embarked','Parch'.
-    DAG_edges = bnlearn.structure_learning.fit(dfnum, methodtype='hc', bw_list_method='edges', black_list=['Survived','Pclass','Sex','Embarked','Parch'])
+    # Forbid these directed edges while leaving the remaining search space open.
+    forbidden_edges = [
+        ('Pclass', 'Survived'),
+        ('Sex', 'Survived'),
+        ('Embarked', 'Survived'),
+        ('Parch', 'Survived'),
+    ]
+    DAG_edges = bnlearn.structure_learning.fit(
+        dfnum,
+        methodtype='hc',
+        bw_list_method='edges',
+        black_list=forbidden_edges,
+    )
 
     # Plot
     Gf = bnlearn.plot(DAG_nodes)

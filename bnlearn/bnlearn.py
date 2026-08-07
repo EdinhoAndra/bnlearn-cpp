@@ -23,7 +23,7 @@ from decimal import Decimal
 from itertools import product
 from collections import defaultdict
 
-from pgmpy.models import BayesianNetwork, NaiveBayes, MarkovNetwork
+from pgmpy.models import DiscreteBayesianNetwork, DiscreteMarkovNetwork, NaiveBayes
 from pgmpy.models import DynamicBayesianNetwork as DBN
 from pgmpy.factors.discrete import TabularCPD
 
@@ -70,7 +70,7 @@ def to_bayesiannetwork(model, verbose=3):
     # Convert to vector
     vec = adjmat2vec(adjmat)[['source', 'target']].values.tolist()
     # Make BayesianNetwork
-    bayesianmodel = BayesianNetwork(vec)
+    bayesianmodel = DiscreteBayesianNetwork(vec)
     # Add any nodes from the adjmat that have no incoming or outgoing edges
     # (isolated nodes); otherwise they would silently disappear since
     # adjmat2vec() only returns edges.
@@ -221,7 +221,7 @@ def make_DAG(DAG, CPD=None, methodtype='bayes', isolated_nodes=None, checkmodel=
     elif isinstance(DAG, list) and methodtype == 'bayes':
         if verbose>=3: print('[bnlearn] >%s DAG created.' %(methodtype))
         edges = DAG
-        DAG = BayesianNetwork()
+        DAG = DiscreteBayesianNetwork()
         DAG.add_edges_from(edges)
         if isolated_nodes is not None: DAG.add_nodes_from(isolated_nodes)
         # DAG.add_nodes_from(CPD)
@@ -230,8 +230,8 @@ def make_DAG(DAG, CPD=None, methodtype='bayes', isolated_nodes=None, checkmodel=
         if verbose>=3: print(f'[bnlearn] >[{methodtype}] DAG created.')
         if verbose>=3: print(f'[bnlearn] >[{methodtype}] is not supported to store the CPTs in the model.')
         edges = DAG
-        # DAG = MarkovNetwork(DAG)
-        DAG = MarkovNetwork()
+        # DAG = DiscreteMarkovNetwork(DAG)
+        DAG = DiscreteMarkovNetwork()
         DAG.add_edges_from(edges)
         if isolated_nodes is not None: DAG.add_nodes_from(isolated_nodes)
         # DAG.add_nodes_from(CPD)
@@ -696,7 +696,7 @@ def _bif2bayesian(pathname, verbose=3):
     bifmodel = BIFReader(path=pathname)
 
     try:
-        model = BayesianNetwork(bifmodel.variable_edges)
+        model = DiscreteBayesianNetwork(bifmodel.variable_edges)
         model.name = bifmodel.network_name
         model.add_nodes_from(bifmodel.variable_names)
 
@@ -794,7 +794,7 @@ def _DAG_sprinkler(CPD=True):
 
     """
     # Define the network structure
-    model = BayesianNetwork([('Cloudy', 'Sprinkler'),
+    model = DiscreteBayesianNetwork([('Cloudy', 'Sprinkler'),
                            ('Cloudy', 'Rain'),
                            ('Sprinkler', 'Wet_Grass'),
                            ('Rain', 'Wet_Grass')])
@@ -2004,14 +2004,14 @@ def independence_test(model, df, test="chi_square", alpha=0.05, prune=False, ver
     >>> 3       Rain  Wet_Grass       True  3.886511e-64  285.901702    1
 
     """
-    from pgmpy.estimators.CITests import chi_square, g_sq, log_likelihood, freeman_tuckey, modified_log_likelihood, neyman, cressie_read  # noqa
-    from pgmpy.models import BayesianNetwork
+    from pgmpy.ci_tests import ChiSquare, GSq, LogLikelihood, ModifiedLogLikelihood, PowerDivergence
+    from pgmpy.models import DiscreteBayesianNetwork
     from pgmpy.base import DAG
     from lingam import DirectLiNGAM, ICALiNGAM
     if model.get('model', None) is None: raise ValueError('[bnlearn]> No model detected.')
-    if not isinstance(model['model'], (DAG, BayesianNetwork, DirectLiNGAM, ICALiNGAM)): raise ValueError("[bnlearn]> model must be an instance of pgmpy.base.DAG or pgmpy.models.BayesianNetwork. Got {type(model)}")
+    if not isinstance(model['model'], (DAG, DiscreteBayesianNetwork, DirectLiNGAM, ICALiNGAM)): raise ValueError("[bnlearn]> model must be an instance of pgmpy.base.DAG or pgmpy.models.DiscreteBayesianNetwork. Got {type(model)}")
     if not isinstance(df, pd.DataFrame): raise ValueError("[bnlearn]> data must be a pandas.DataFrame instance. Got {type(data)}")
-    if isinstance(model['model'], (DAG, BayesianNetwork)):
+    if isinstance(model['model'], (DAG, DiscreteBayesianNetwork)):
         if not np.all(np.isin(model['model'].nodes(), df.columns)): raise ValueError("[bnlearn]> Missing columns in data. Can't find values for the following variables: { set(model.nodes()) - set(data.columns) }")
 
     # Get a copy of the model
@@ -2038,15 +2038,23 @@ def independence_test(model, df, test="chi_square", alpha=0.05, prune=False, ver
         model_update['independence_test']['stat_test'] = model_update['independence_test']['p_value'] <= alpha
     else:
         if verbose>=3: print('[bnlearn] >Compute edge strength with [%s]' %(test))
-        # Get the statistical test
-        statistical_test = eval(test)
+        test_factories = {
+            'chi_square': lambda: ChiSquare(df),
+            'g_sq': lambda: GSq(df),
+            'log_likelihood': lambda: LogLikelihood(df),
+            'modified_log_likelihood': lambda: ModifiedLogLikelihood(df),
+            'freeman_tuckey': lambda: PowerDivergence(df, lambda_='freeman-tuckey'),
+            'neyman': lambda: PowerDivergence(df, lambda_='neyman'),
+            'cressie_read': lambda: PowerDivergence(df, lambda_='cressie-read'),
+        }
+        if test not in test_factories:
+            raise ValueError('[bnlearn] >Unknown independence test: %s' % test)
+        statistical_test = test_factories[test]()
         # Compute significance
         results = []
         for i, j in model_update['model_edges']:
-            # test_result = power_divergence(i, j, [], df, boolean=False, lambda_="cressie-read", significance_level=0.05)
-            # chi, p_value, dof, expected = stats.chi2_contingency( df.groupby([i, j]).size().unstack(j, fill_value=0), lambda_="cressie-read" )
-            test_result = statistical_test(X=i, Y=j, Z=[], data=df, boolean=False, significance_level=alpha)
-            results.append({"source": i, "target": j, "stat_test": test_result[1]<=alpha, 'p_value': test_result[1], test: test_result[0], 'dof': test_result[2]})
+            statistic, p_value = statistical_test.run_test(X=i, Y=j, Z=[])
+            results.append({"source": i, "target": j, "stat_test": p_value<=alpha, 'p_value': p_value, test: statistic, 'dof': statistical_test.dof_})
 
         # Update model
         model_update['independence_test'] = pd.DataFrame(results)

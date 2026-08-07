@@ -20,7 +20,8 @@ Currently, the library supports parameter learning for *discrete* nodes:
 
 
 # %% Libraries
-from pgmpy.estimators import BayesianEstimator
+from pgmpy.models import DiscreteBayesianNetwork
+from pgmpy.parameter_estimator import DiscreteBayesianEstimator, DiscreteMLE
 import bnlearn
 import copy
 import warnings
@@ -134,22 +135,27 @@ def fit(model, df, methodtype='bayes', scoretype='bdeu', smooth=None, n_jobs=-1,
     if isinstance(model, dict):
         model = model['model']
 
-    # Convert to BayesianNetwork
-    if 'BayesianNetwork' not in str(type(model)):
-        if config['verbose']>=3: print('[bnlearn] >Converting [%s] to BayesianNetwork model.' %(str(type(model))))
+    # Convert a learned DAG to a parameterizable discrete Bayesian network.
+    if config['method'] != 'DBN' and not isinstance(model, DiscreteBayesianNetwork):
+        if config['verbose']>=3: print('[bnlearn] >Converting [%s] to DiscreteBayesianNetwork model.' %(str(type(model))))
         model = bnlearn.to_bayesiannetwork(adjmat, verbose=config['verbose'])
 
     # Learn on CPDs
     if config['method']=='ml' or config['method']=='maximumlikelihood':
         # Learning CPDs using Maximum Likelihood Estimators
-        model.fit(df, estimator=None)  # estimator as None makes it maximum likelihood estimator according pgmpy docs.
+        model.fit(df, estimator=DiscreteMLE(n_jobs=config['n_jobs']))
         for cpd in model.get_cpds():
             if config['verbose']>=2: print("[bnlearn] >CPD of {variable}:".format(variable=cpd.variable))
             if config['verbose']>=2: print(cpd)
     elif config['method']=='bayes':
         #  Learning CPDs using Bayesian Parameter Estimation
-        model.fit(df, estimator=BayesianEstimator, prior_type=scoretype, equivalent_sample_size=1000, pseudo_counts=smooth, n_jobs=config['n_jobs'])
-        # model.fit(df, estimator=BayesianEstimator, prior_type="BDeu", equivalent_sample_size=1000, pseudo_counts=smooth)
+        estimator = DiscreteBayesianEstimator(
+            prior_type=scoretype,
+            equivalent_sample_size=1000,
+            pseudo_counts=smooth,
+            n_jobs=config['n_jobs'],
+        )
+        model.fit(df, estimator=estimator)
         for cpd in model.get_cpds():
             if config['verbose']>=2: print("[bnlearn] >CPD of {variable}:".format(variable=cpd.variable))
             if config['verbose']>=2: print(cpd)

@@ -4,6 +4,7 @@
 import pytest
 import bnlearn as bn
 from pgmpy.factors.discrete import TabularCPD
+from pgmpy.models import DiscreteBayesianNetwork
 from pgmpy.sampling import BayesianModelSampling
 import numpy as np
 import pandas as pd
@@ -115,7 +116,7 @@ def test_import_DAG():
     # TEST 2: Check model output is unchanged
     assert DAG['adjmat'].sum().sum() == 4
     # TEST 3:
-    assert 'pgmpy.models.BayesianNetwork' in str(type(DAG['model']))
+    assert isinstance(DAG['model'], DiscreteBayesianNetwork)
     # TEST 4:
     # DAG = bn.import_DAG('alarm', verbose=0)
     # assert DAG.keys() == {'model', 'adjmat'}
@@ -132,7 +133,7 @@ def test_make_DAG():
         DAG = bn.make_DAG(edges, methodtype=methodtype)
         # TEST 1
         if methodtype == 'bayes':
-            assert 'pgmpy.models.BayesianNetwork' in str(type(DAG['model']))
+            assert isinstance(DAG['model'], DiscreteBayesianNetwork)
         else:
             assert 'pgmpy.models.NaiveBayes.NaiveBayes' in str(type(DAG['model']))
     # TEST 2
@@ -293,7 +294,7 @@ def test_query2df():
     dfnum.loc[0:50, 'Survived'] = 2
     # Structure learning
     DAG = bn.structure_learning.fit(dfnum, methodtype='hc', black_list=['Embarked', 'Parch', 'Name'],
-                                    bw_list_method='edges')
+                                    bw_list_method='nodes')
     # Parameter learning
     model = bn.parameter_learning.fit(DAG, dfnum)
     # Make inference

@@ -1,4 +1,4 @@
-"""Benchmark pgmpy 0.1.25 scores against bnlearn's vectorized backends."""
+"""Benchmark the NumPy and CuPy backends supplied by the custom pgmpy fork."""
 
 import argparse
 import json
@@ -7,9 +7,7 @@ from time import perf_counter
 
 import numpy as np
 import pandas as pd
-from pgmpy.estimators import BicScore
-
-from bnlearn.accelerated_scores import get_accelerated_score
+from pgmpy.structure_score import BIC
 
 
 def make_queries(columns, max_parents):
@@ -23,12 +21,8 @@ def make_queries(columns, max_parents):
 
 def benchmark(data, queries, backend, repeats):
     init_start = perf_counter()
-    if backend == "legacy":
-        score = BicScore(data)
-        resolved_backend = "pandas"
-    else:
-        score = get_accelerated_score(data, "bic", compute_backend=backend)
-        resolved_backend = score.resolved_backend_
+    score = BIC(data, compute_backend=backend)
+    resolved_backend = score.resolved_backend_
     initialization_seconds = perf_counter() - init_start
 
     durations = []
@@ -54,7 +48,7 @@ def main():
     parser.add_argument("--cardinality", type=int, default=4)
     parser.add_argument("--max-parents", type=int, default=2)
     parser.add_argument("--repeats", type=int, default=2)
-    parser.add_argument("--backends", nargs="+", default=["legacy", "numpy", "cupy"])
+    parser.add_argument("--backends", nargs="+", default=["numpy", "cupy"])
     args = parser.parse_args()
 
     rng = np.random.default_rng(42)
@@ -69,8 +63,8 @@ def main():
     reference = np.asarray(results[0].pop("scores"))
     for result in results[1:]:
         scores = np.asarray(result.pop("scores"))
-        result["max_abs_error_vs_legacy"] = float(np.max(np.abs(scores - reference)))
-        result["speedup_vs_legacy"] = results[0]["best_score_batch_seconds"] / result[
+        result["max_abs_error_vs_numpy"] = float(np.max(np.abs(scores - reference)))
+        result["speedup_vs_numpy"] = results[0]["best_score_batch_seconds"] / result[
             "best_score_batch_seconds"
         ]
     results[0].pop("scores", None)

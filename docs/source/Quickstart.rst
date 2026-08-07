@@ -3,14 +3,23 @@
 Installation
 ============
 
-Installing bnlearn is straightforward. 
-It is recommended to create a new environment for the installation.
+Python 3.10 or newer is required. It is recommended to create a new
+environment and install the custom fork directly from GitHub.
 
 .. code-block:: console
 
-   conda create -n env_bnlearn python=3.8
+   conda create -n env_bnlearn python=3.13
    conda activate env_bnlearn
-   pip install bnlearn
+   pip install "bnlearn @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
+
+For a CUDA 12 GPU, install the optional GPU extra instead:
+
+.. code-block:: console
+
+   pip install "bnlearn[gpu-cu12] @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
+
+The compatible custom ``pgmpy`` commit is installed automatically from the
+dependency pin in ``pyproject.toml``.
 
 Quick Examples
 ========================
