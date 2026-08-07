@@ -6,6 +6,7 @@
 import sys
 import platform
 import warnings
+from inspect import signature
 
 _IS_WINDOWS = platform.system() == "Windows"
 _PYTHON_MAJOR = sys.version_info.major
@@ -90,8 +91,17 @@ __version__ = '0.14.0'
 
 import pgmpy
 # Check version pgmpy
-if version.parse(pgmpy.__version__) < version.parse("0.1.18"):
-    raise ImportError('[bnlearn] >Error: This release requires pgmpy to be version == 0.1.25. Try to: <pip install -U pgmpy==0.1.25>')
+if version.parse(pgmpy.__version__) < version.parse("1.1.2"):
+    raise ImportError(
+        '[bnlearn] >Error: This release requires the custom pgmpy fork at '
+        'EdinhoAndra/pgmpy commit a2ddea21b36b0209ed5295f55a450d5f78acc709.'
+    )
+if 'compute_backend' not in signature(structure_learning.BIC).parameters:
+    raise ImportError(
+        '[bnlearn] >Error: The installed pgmpy does not provide the custom '
+        'NumPy/CuPy score backend. Install EdinhoAndra/pgmpy commit '
+        'a2ddea21b36b0209ed5295f55a450d5f78acc709.'
+    )
 
 # Version check
 import matplotlib

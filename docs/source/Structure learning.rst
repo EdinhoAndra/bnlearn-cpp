@@ -82,11 +82,12 @@ GPU acceleration and CPU parallelism
 ====================================
 
 The discrete ``bic``, ``k2``, ``bdeu``, ``bds``, and ``aic`` scores support
-vectorized NumPy and CuPy backends. Install the CUDA 12 extra when using a GPU:
+vectorized NumPy and CuPy backends supplied natively by the pinned custom
+``EdinhoAndra/pgmpy`` fork. Install the CUDA 12 extra when using a GPU:
 
 .. code-block:: bash
 
-    pip install "bnlearn[gpu-cu12]"
+    pip install "bnlearn[gpu-cu12] @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
 
 Use ``compute_backend='auto'`` for a safe GPU selection with automatic NumPy
 fallback, or ``compute_backend='cupy'`` to require CUDA explicitly:
@@ -105,6 +106,17 @@ fallback, or ``compute_backend='cupy'`` to require CUDA explicitly:
 Hill Climb candidate scores use ``n_jobs`` CPU threads with the NumPy backend.
 The CuPy backend uses one host thread so that CUDA kernels are scheduled without
 thread contention.
+
+The Hill Climb implementation also uses the canonical
+``pgmpy.causal_discovery.HillClimbSearch`` and ``ExpertKnowledge`` APIs. The
+existing bnlearn arguments are translated directly as follows:
+
+* ``black_list`` becomes ``ExpertKnowledge.forbidden_edges``;
+* ``white_list`` becomes ``ExpertKnowledge.search_space``;
+* ``fixed_edges`` becomes ``ExpertKnowledge.required_edges``.
+
+Consequently, consuming projects do not need an external compatibility layer
+for the legacy pgmpy 0.1.25 Hill Climb arguments.
 
 Exhaustivesearch
 ===================

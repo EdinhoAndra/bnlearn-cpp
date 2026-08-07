@@ -2198,16 +2198,16 @@ model = bn.load(filepath='bnlearn_model')
 
 # %% CHECK DIFFERENCES PGMPY vs. BNLEARN
 
-from pgmpy.estimators import ExhaustiveSearch, HillClimbSearch, TreeSearch
-from pgmpy.models import BayesianNetwork, NaiveBayes
+from pgmpy.causal_discovery import TAN
+from pgmpy.models import DiscreteBayesianNetwork
 from pgmpy.inference import VariableElimination
 
 df=bn.import_example(data='andes')
 
 # PGMPY
-est = TreeSearch(df)
-dag = est.estimate(estimator_type="tan", class_node='DISPLACEM0')
-bnq = BayesianNetwork(dag.edges())
+est = TAN(class_node='DISPLACEM0', show_progress=False).fit(df)
+dag = est.causal_graph_
+bnq = DiscreteBayesianNetwork(dag.edges())
 bnq.fit(df, estimator=None)  # None means maximum likelihood estimator
 bn_infer = VariableElimination(bnq)
 q = bn_infer.query(variables=['DISPLACEM0'], evidence={'RApp1': 1})
@@ -2251,9 +2251,9 @@ for cpd_bnlearn in model_bn['model'].get_cpds():
 # Import example
 df = bn.import_example(data='asia')
 
-# Do the tan learning
-est = TreeSearch(df)
-dag = est.estimate(estimator_type="tan", class_node='lung')
+# Do the TAN learning through pgmpy's canonical API.
+est = TAN(class_node='lung', show_progress=False).fit(df)
+dag = est.causal_graph_
 
 # And now with bnlearn
 model = bn.structure_learning.fit(df, methodtype='tan', class_node='lung')
@@ -2593,10 +2593,10 @@ bn.compare_networks(model, model_sl, pos=G['pos'])
 
 
 # Structure learning with black list
-model_wl = bn.structure_learning.fit(df, methodtype='hc', white_list=['asia', 'tub', 'bronc', 'xray', 'smoke'], bw_list_method='edges')
+model_wl = bn.structure_learning.fit(df, methodtype='hc', white_list=['asia', 'tub', 'bronc', 'xray', 'smoke'], bw_list_method='nodes')
 bn.plot(model_wl, pos=G['pos'])
 
-model_bl = bn.structure_learning.fit(df, methodtype='hc', black_list=['asia', 'tub'], bw_list_method='edges')
+model_bl = bn.structure_learning.fit(df, methodtype='hc', black_list=['asia', 'tub'], bw_list_method='nodes')
 bn.plot(model_bl, pos=G['pos'])
 
 # Compare models
@@ -2694,7 +2694,7 @@ dfhot, dfnum = bn.df2onehot(df_raw)
 dfnum.loc[0:50, 'Survived'] = 2
 # Structure learning
 # DAG = bn.structure_learning.fit(dfnum, methodtype='cl', black_list=['Embarked','Parch','Name'], root_node='Survived', bw_list_method='nodes')
-DAG = bn.structure_learning.fit(dfnum, methodtype='hc', black_list=['Embarked', 'Parch', 'Name'], bw_list_method='edges')
+DAG = bn.structure_learning.fit(dfnum, methodtype='hc', black_list=['Embarked', 'Parch', 'Name'], bw_list_method='nodes')
 # Plot
 G = bn.plot(DAG)
 G = bn.plot(DAG, interactive=True)
@@ -2896,4 +2896,3 @@ print(q1.values)
 
 
 # %%
-    

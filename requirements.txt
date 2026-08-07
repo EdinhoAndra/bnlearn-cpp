@@ -1,4 +1,4 @@
-pgmpy==0.1.25 # This is needed because above this version all kinds of third party google and LLM stuff is imported that we do not need.
+pgmpy @ git+https://github.com/EdinhoAndra/pgmpy.git@a2ddea21b36b0209ed5295f55a450d5f78acc709
 networkx>=2.7.1
 matplotlib>=3.3.4
 numpy>=1.24.1

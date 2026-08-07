@@ -1,29 +1,23 @@
 Installation
 ============
 
-Install from PyPI (pip)
------------------------
+Install the custom forks
+------------------------
 
-The simplest way to install bnlearn is using pip:
-
-.. code-block:: console
-
-    pip install bnlearn
-
-To force install the latest version, use the -U (update) argument:
+Install the ``EdinhoAndra/bnlearn`` fork directly from GitHub:
 
 .. code-block:: console
 
-    pip install -U bnlearn
+    pip install "bnlearn @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
 
-Install from GitHub
--------------------
-
-To install the latest development version directly from GitHub:
+For CUDA 12, install its GPU extra:
 
 .. code-block:: console
 
-    pip install git+https://github.com/erdogant/bnlearn
+    pip install "bnlearn[gpu-cu12] @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
+
+The package metadata pins the compatible ``EdinhoAndra/pgmpy`` commit. Do not
+install the PyPI versions of ``bnlearn`` or ``pgmpy`` into the same environment.
 
 Create Environment
 ------------------

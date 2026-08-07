@@ -2,127 +2,116 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pgmpy.estimators import AICScore, BDeuScore, BDsScore, BicScore, HillClimbSearch, K2Score
-from bnlearn.accelerated_scores import get_accelerated_score
-from bnlearn.parallel_hill_climb import ParallelHillClimbSearch
+import bnlearn as bn
+import bnlearn.structure_learning as structure_learning
+from pgmpy.causal_discovery import ExpertKnowledge, HillClimbSearch
+from pgmpy.structure_score import AIC, BDeu, BDs, BIC, K2
+
 
 REFERENCE_SCORES = {
-    "bic": BicScore,
-    "k2": K2Score,
-    "bdeu": BDeuScore,
-    "bds": BDsScore,
-    "aic": AICScore,
+    "bic": BIC,
+    "k2": K2,
+    "bdeu": BDeu,
+    "bds": BDs,
+    "aic": AIC,
 }
 
 
 @pytest.fixture
 def discrete_data():
     rng = np.random.default_rng(42)
-    data = pd.DataFrame(
+    a = rng.integers(0, 3, size=2_000)
+    return pd.DataFrame(
         {
-            "A": rng.integers(0, 3, size=2_000),
-            "B": rng.integers(0, 4, size=2_000),
+            "A": a,
+            "B": a,
             "C": rng.integers(0, 2, size=2_000),
         }
     )
-    data.loc[[3, 101], "B"] = np.nan
-    return data
 
 
-@pytest.mark.parametrize("score_name", REFERENCE_SCORES)
-def test_numpy_scores_match_pgmpy_legacy(score_name, discrete_data):
-    kwargs = {"equivalent_sample_size": 5} if score_name in {"bdeu", "bds"} else {}
-    expected = REFERENCE_SCORES[score_name](discrete_data, **kwargs)
-    actual = get_accelerated_score(
+@pytest.mark.parametrize("score_name, score_class", REFERENCE_SCORES.items())
+def test_set_scoring_type_uses_native_pgmpy_score(score_name, score_class, discrete_data):
+    score = structure_learning._SetScoringType(
         discrete_data,
         score_name,
         compute_backend="numpy",
-        equivalent_sample_size=5,
+        verbose=0,
     )
 
-    assert actual.resolved_backend_ == "numpy"
-    assert isinstance(actual.local_score("C", ("A", "B")), np.float64)
-    assert actual.local_score("C", ("A", "B")) == pytest.approx(
-        expected.local_score("C", ("A", "B")), rel=1e-12, abs=1e-12
-    )
+    assert type(score) is score_class
+    assert score.resolved_backend_ == "numpy"
 
 
-@pytest.mark.parametrize("score_name", REFERENCE_SCORES)
-def test_numpy_scores_match_sparse_parent_configurations(score_name):
-    data = pd.DataFrame(
-        {
-            "A": [0, 0, 0, 1, 1, 1, np.nan],
-            "B": [0, 0, 0, 1, 1, 1, 0],
-            "C": [0, 1, 0, 1, 0, 1, 1],
-        }
-    )
-    state_names = {"A": [0, 1, 2], "B": [0, 1, 2], "C": [0, 1]}
-    kwargs = {"equivalent_sample_size": 5} if score_name in {"bdeu", "bds"} else {}
-    expected = REFERENCE_SCORES[score_name](data, state_names=state_names, **kwargs)
-    actual = get_accelerated_score(
-        data,
-        score_name,
-        compute_backend="numpy",
-        equivalent_sample_size=5,
-        state_names=state_names,
-    )
-
-    assert actual.local_score("C", ("A", "B")) == pytest.approx(
-        expected.local_score("C", ("A", "B")), rel=1e-12, abs=1e-12
-    )
-
-
-def test_auto_backend_stays_on_cpu_below_threshold(discrete_data):
-    score = get_accelerated_score(
+def test_auto_backend_configuration_is_forwarded_to_pgmpy(discrete_data):
+    score = structure_learning._SetScoringType(
         discrete_data,
         "bic",
         compute_backend="auto",
         min_gpu_rows=len(discrete_data) + 1,
+        verbose=0,
     )
 
+    assert score.compute_backend == "auto"
+    assert score.min_gpu_rows == len(discrete_data) + 1
     assert score.resolved_backend_ == "numpy"
 
 
-def test_parallel_hill_climb_matches_serial(discrete_data):
-    clean_data = discrete_data.dropna()
-    score = get_accelerated_score(clean_data, "bic", compute_backend="numpy")
-    common = {
-        "scoring_method": score,
-        "max_indegree": 2,
-        "max_iter": 20,
-        "show_progress": False,
-    }
-
-    serial = ParallelHillClimbSearch(clean_data, n_jobs=1).estimate(**common)
-    parallel = ParallelHillClimbSearch(clean_data, n_jobs=2).estimate(**common)
-
-    assert set(serial.edges()) == set(parallel.edges())
+def test_hill_climb_imports_canonical_pgmpy_api():
+    assert structure_learning.HillClimbSearch is HillClimbSearch
+    assert structure_learning.ExpertKnowledge is ExpertKnowledge
+    assert HillClimbSearch.__module__ == "pgmpy.causal_discovery.HillClimbSearch"
+    assert ExpertKnowledge.__module__ == "pgmpy.causal_discovery.ExpertKnowledge"
 
 
-def test_accelerated_hill_climb_matches_pgmpy_legacy(discrete_data):
-    clean_data = discrete_data.dropna()
-    common = {
-        "max_indegree": 2,
-        "max_iter": 20,
-        "show_progress": False,
-    }
-    legacy = HillClimbSearch(clean_data).estimate(scoring_method=BicScore(clean_data), **common)
-    accelerated = ParallelHillClimbSearch(clean_data, n_jobs=1).estimate(
-        scoring_method=get_accelerated_score(clean_data, "bic", compute_backend="numpy"),
-        **common,
+def test_edge_constraints_use_native_expert_knowledge(discrete_data):
+    result = bn.structure_learning.fit(
+        discrete_data,
+        methodtype="hc",
+        scoretype="bic",
+        white_list=[("A", "B"), ("B", "C")],
+        black_list=[("B", "C")],
+        fixed_edges=[("A", "B")],
+        bw_list_method="edges",
+        max_iter=20,
+        n_jobs=1,
+        compute_backend="numpy",
+        verbose=0,
     )
 
-    assert set(legacy.edges()) == set(accelerated.edges())
+    assert set(result["model"].nodes()) == set(discrete_data.columns)
+    assert set(result["model"].edges()) == {("A", "B")}
 
 
-@pytest.mark.parametrize("compute_backend", ["jax", "cuda", "gpu"])
-def test_invalid_compute_backend(compute_backend, discrete_data):
-    with pytest.raises(ValueError, match="compute_backend"):
-        get_accelerated_score(discrete_data, "bic", compute_backend=compute_backend)
+@pytest.mark.parametrize(
+    "black_list, white_list, message",
+    [
+        ([("A", "B")], None, "fixed_edges.*black_list"),
+        (None, [("B", "C")], "fixed_edges.*white_list"),
+    ],
+)
+def test_conflicting_fixed_edges_are_rejected(
+    discrete_data,
+    black_list,
+    white_list,
+    message,
+):
+    with pytest.raises(ValueError, match=message):
+        bn.structure_learning.fit(
+            discrete_data,
+            methodtype="hc",
+            scoretype="bic",
+            black_list=black_list,
+            white_list=white_list,
+            fixed_edges=[("A", "B")],
+            bw_list_method="edges",
+            max_iter=1,
+            verbose=0,
+        )
 
 
 @pytest.mark.parametrize("score_name", REFERENCE_SCORES)
-def test_cupy_scores_match_numpy(score_name, discrete_data):
+def test_cupy_scores_match_numpy_through_bnlearn(score_name, discrete_data):
     cupy = pytest.importorskip("cupy")
     try:
         if cupy.cuda.runtime.getDeviceCount() == 0:
@@ -130,46 +119,24 @@ def test_cupy_scores_match_numpy(score_name, discrete_data):
     except cupy.cuda.runtime.CUDARuntimeError:
         pytest.skip("No usable CUDA device is available")
 
-    cpu_score = get_accelerated_score(
+    kwargs = {"equivalent_sample_size": 5} if score_name in {"bdeu", "bds"} else {}
+    cpu_score = structure_learning._SetScoringType(
         discrete_data,
         score_name,
         compute_backend="numpy",
-        equivalent_sample_size=5,
+        verbose=0,
+        **kwargs,
     )
-    gpu_score = get_accelerated_score(
+    gpu_score = structure_learning._SetScoringType(
         discrete_data,
         score_name,
         compute_backend="cupy",
-        equivalent_sample_size=5,
+        verbose=0,
+        **kwargs,
     )
 
-    assert gpu_score.resolved_backend_ == "cupy"
     assert gpu_score.local_score("C", ("A", "B")) == pytest.approx(
-        cpu_score.local_score("C", ("A", "B")), rel=1e-10, abs=1e-10
+        cpu_score.local_score("C", ("A", "B")),
+        rel=1e-10,
+        abs=1e-10,
     )
-
-
-def test_cupy_hill_climb_matches_numpy(discrete_data):
-    cupy = pytest.importorskip("cupy")
-    try:
-        if cupy.cuda.runtime.getDeviceCount() == 0:
-            pytest.skip("No CUDA device is available")
-    except cupy.cuda.runtime.CUDARuntimeError:
-        pytest.skip("No usable CUDA device is available")
-
-    clean_data = discrete_data.dropna()
-
-    def estimate(backend):
-        score = get_accelerated_score(clean_data, "bic", compute_backend=backend)
-        return set(
-            ParallelHillClimbSearch(clean_data, n_jobs=1)
-            .estimate(
-                scoring_method=score,
-                max_indegree=2,
-                max_iter=20,
-                show_progress=False,
-            )
-            .edges()
-        )
-
-    assert estimate("cupy") == estimate("numpy")

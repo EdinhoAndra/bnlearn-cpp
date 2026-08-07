@@ -99,13 +99,17 @@ Because probabilistic graphical models can be difficult to use, ``Bnlearn`` cont
 
 Python 3.10 or newer is required.
 
-##### Install bnlearn from PyPI
+##### Install the EdinhoAndra custom fork
 ```bash
-pip install bnlearn
+pip install "bnlearn @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
 ```
-##### Install bnlearn from github source
+The custom `pgmpy` dependency is pinned by commit in `pyproject.toml`; do not
+install the PyPI versions of `bnlearn` or `pgmpy` into the same environment.
+
+For a CUDA 12 GPU:
+
 ```bash
-pip install git+https://github.com/erdogant/bnlearn
+pip install "bnlearn[gpu-cu12] @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
 ```
 ##### Run the tests from a source checkout
 ```bash
