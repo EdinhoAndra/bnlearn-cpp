@@ -9,12 +9,219 @@
 
 """
 # %% Libraries
+from collections.abc import Mapping
+
 import matplotlib.pyplot as plt
+from pgmpy.factors.discrete import DiscreteFactor
 from pgmpy.inference import VariableElimination
+from pgmpy.utils import compat_fns
 import numpy as np
 import bnlearn
 import warnings
 warnings.filterwarnings("ignore")
+
+
+class CompiledInference:
+    """Reusable exact-inference engine for a fitted discrete Bayesian network.
+
+    The pgmpy :class:`VariableElimination` object is built once and reused for
+    every query. For a single target whose direct parents are all observed, a
+    batch can be answered directly from its CPD. The direct lookup remains
+    exact in the presence of additional non-descendant evidence; rows with
+    missing parents or descendant evidence fall back to variable elimination.
+
+    Recompile the engine after mutating the graph or any of its CPDs.
+    """
+
+    def __init__(self, model):
+        if not isinstance(model, dict):
+            raise Exception('[bnlearn] >Error: Input requires a object that contains the key: model.')
+        if 'model' not in model:
+            raise Exception('[bnlearn] >Error: Input requires a object that contains the key: model.')
+
+        self.model_dict = model
+        self.model = model['model']
+        if 'BayesianNetwork' not in str(type(self.model)):
+            raise TypeError(
+                '[bnlearn] >Error: Inference requires BayesianNetwork. '
+                'hint: try: parameter_learning.fit(DAG, df, methodtype="bayes")'
+            )
+        try:
+            self._ve = VariableElimination(self.model)
+        except ValueError as exc:
+            raise Exception(f'[bnlearn] >Error: {exc}') from exc
+
+        self._nodes = set(self.model.nodes())
+        self._direct_lookups = {}
+
+    def _validate_request(self, variables, evidences):
+        if isinstance(variables, str):
+            variables = [variables]
+        elif variables is None:
+            raise ValueError('[bnlearn] >Error: [variables] must contain at least one node.')
+        else:
+            variables = list(variables)
+
+        if not variables:
+            raise ValueError('[bnlearn] >Error: [variables] must contain at least one node.')
+        unknown_variables = set(variables) - self._nodes
+        if unknown_variables:
+            raise ValueError(
+                f'[bnlearn] >Error: [variables] contains nodes not present in the model: '
+                f'{sorted(unknown_variables, key=str)}'
+            )
+
+        evidences = list(evidences)
+        for index, evidence in enumerate(evidences):
+            if not isinstance(evidence, Mapping):
+                raise TypeError(f'[bnlearn] >Error: evidence at index {index} must be a mapping.')
+            unknown_evidence = set(evidence) - self._nodes
+            if unknown_evidence:
+                raise ValueError(
+                    f'[bnlearn] >Error: evidence at index {index} contains nodes not present '
+                    f'in the model: {sorted(unknown_evidence, key=str)}'
+                )
+        return variables, evidences
+
+    def _get_direct_lookup(self, target):
+        lookup = self._direct_lookups.get(target)
+        if lookup is not None:
+            return lookup
+
+        cpd = self.model.get_cpds(target)
+        if cpd is None:
+            raise ValueError(f'[bnlearn] >Error: No CPD is associated with target {target!r}.')
+
+        parents = tuple(cpd.variables[1:])
+        parent_cards = tuple(int(card) for card in cpd.cardinality[1:])
+        descendants = set()
+        frontier = list(self.model.successors(target))
+        while frontier:
+            node = frontier.pop()
+            if node not in descendants:
+                descendants.add(node)
+                frontier.extend(self.model.successors(node))
+
+        lookup = {
+            'cpd': cpd,
+            'parents': parents,
+            'parent_cards': parent_cards,
+            'descendants': descendants,
+            'values': compat_fns.to_numpy(cpd.get_values()),
+        }
+        self._direct_lookups[target] = lookup
+        return lookup
+
+    @staticmethod
+    def _factor_from_probabilities(target, cpd, probabilities):
+        return DiscreteFactor(
+            variables=[target],
+            cardinality=[int(cpd.variable_card)],
+            values=probabilities,
+            state_names={target: list(cpd.state_names[target])},
+        )
+
+    def _query_direct_rows(self, target, evidences, result, joint):
+        lookup = self._get_direct_lookup(target)
+        parents = lookup['parents']
+        descendants = lookup['descendants']
+
+        eligible_indexes = [
+            index
+            for index, evidence in enumerate(evidences)
+            if target not in evidence
+            and all(parent in evidence for parent in parents)
+            and descendants.isdisjoint(evidence)
+        ]
+        if not eligible_indexes:
+            return set()
+
+        cpd = lookup['cpd']
+        if parents:
+            parent_codes = np.empty((len(eligible_indexes), len(parents)), dtype=np.intp)
+            for row, index in enumerate(eligible_indexes):
+                evidence = evidences[index]
+                for column, parent in enumerate(parents):
+                    parent_codes[row, column] = cpd.get_state_no(parent, evidence[parent])
+            column_indexes = np.ravel_multi_index(
+                parent_codes.T,
+                lookup['parent_cards'],
+            )
+        else:
+            column_indexes = np.zeros(len(eligible_indexes), dtype=np.intp)
+
+        probabilities = lookup['values'][:, column_indexes]
+        probabilities = probabilities / probabilities.sum(axis=0, keepdims=True)
+        for column, index in enumerate(eligible_indexes):
+            factor = self._factor_from_probabilities(target, cpd, probabilities[:, column])
+            result[index] = factor if joint else {target: factor}
+        return set(eligible_indexes)
+
+    def query_many(
+        self,
+        variables,
+        evidences,
+        elimination_order='greedy',
+        joint=True,
+        to_df=False,
+        groupby=None,
+        show_progress=False,
+        verbose=0,
+    ):
+        """Evaluate several evidence configurations in input order.
+
+        Parameters mirror :func:`fit`, except ``evidences`` is a sequence of
+        mappings and plotting is deliberately omitted for batch workloads.
+        Results are pgmpy factors (or dictionaries when ``joint=False``), in
+        the same order as the supplied evidence rows.
+        """
+        variables, evidences = self._validate_request(variables, evidences)
+        if to_df and not joint:
+            raise ValueError('[bnlearn] >Error: to_df=True requires joint=True in query_many().')
+
+        results = [None] * len(evidences)
+        direct_indexes = set()
+        if len(variables) == 1:
+            direct_indexes = self._query_direct_rows(
+                variables[0], evidences, results, joint=joint
+            )
+
+        for index, evidence in enumerate(evidences):
+            if index in direct_indexes:
+                continue
+            results[index] = self._ve.query(
+                variables=variables,
+                evidence=dict(evidence),
+                elimination_order=elimination_order,
+                joint=joint,
+                show_progress=show_progress,
+            )
+
+        if to_df:
+            for evidence, query in zip(evidences, results):
+                query.df = bnlearn.query2df(
+                    query, variables=variables.copy(), groupby=groupby, verbose=verbose
+                )
+                query.text = summarize_inference(
+                    variables, evidence, query, plot=False, verbose=verbose
+                )
+        return results
+
+
+def compile(model):
+    """Compile a reusable :class:`CompiledInference` engine."""
+    return CompiledInference(model)
+
+
+def query_many(model, variables, evidences, **kwargs):
+    """Batch inference convenience wrapper.
+
+    ``model`` can be either a bnlearn model dictionary or an already compiled
+    :class:`CompiledInference` instance. Passing a compiled instance avoids
+    rebuilding pgmpy's variable-elimination engine across calls.
+    """
+    engine = model if isinstance(model, CompiledInference) else CompiledInference(model)
+    return engine.query_many(variables=variables, evidences=evidences, **kwargs)
 
 
 # %% Exact inference using Variable Elimination

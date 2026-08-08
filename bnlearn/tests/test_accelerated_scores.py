@@ -140,3 +140,49 @@ def test_cupy_scores_match_numpy_through_bnlearn(score_name, discrete_data):
         rel=1e-10,
         abs=1e-10,
     )
+
+
+def test_structure_score_methods_selected_only_scores_search_metric(discrete_data):
+    result = bn.structure_learning.fit(
+        discrete_data,
+        methodtype="hc",
+        scoretype="bic",
+        max_iter=5,
+        n_jobs=1,
+        compute_backend="numpy",
+        structure_score_methods="selected",
+        verbose=0,
+    )
+
+    assert set(result["structure_scores"]) == {"bic"}
+    assert result["config"]["structure_score_methods"] == ["bic"]
+
+
+def test_empty_structure_score_methods_skips_post_fit_scoring(discrete_data, monkeypatch):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("post-fit structure scoring must be skipped")
+
+    monkeypatch.setattr(bn, "structure_scores", fail_if_called)
+    result = bn.structure_learning.fit(
+        discrete_data,
+        methodtype="hc",
+        scoretype="bic",
+        max_iter=5,
+        n_jobs=1,
+        compute_backend="numpy",
+        structure_score_methods=[],
+        verbose=0,
+    )
+
+    assert result["structure_scores"] == {}
+    assert result["config"]["structure_score_methods"] == []
+
+
+def test_unknown_structure_score_method_is_rejected(discrete_data):
+    with pytest.raises(ValueError, match="structure_score_methods"):
+        bn.structure_learning.fit(
+            discrete_data,
+            methodtype="hc",
+            structure_score_methods=["not-a-score"],
+            verbose=0,
+        )

@@ -121,6 +121,14 @@ ENV/
 env.bak/
 venv.bak/
 
+# Local benchmark inputs and profiler outputs (never publish sampled data)
+benchmarks/data/
+benchmarks/artifacts/
+*.nsys-rep
+*.ncu-rep
+*.pstats
+*.memray
+
 # Spyder project settings
 .spyderproject
 .spyproject

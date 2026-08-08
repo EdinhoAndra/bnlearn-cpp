@@ -120,6 +120,7 @@ def fit(df,
         verbose=3,
         compute_backend='numpy',
         min_gpu_rows=50000,
+        structure_score_methods=None,
         ):
     """Structure learning fit model.
 
@@ -214,12 +215,19 @@ def fit(df,
         * 'ci_test': 'chi_square', 'pearsonr', 'g_sq', 'log_likelihood', 'freeman_tuckey', 'modified_log_likelihood', 'neyman', 'cressie_read', 'power_divergence'
         * 'alpha': 0.05
     compute_backend : str, (default : 'numpy')
-        Numerical backend for discrete structure scores: 'numpy', 'cupy', or
-        'auto'. The 'auto' option uses CuPy only when a CUDA device is available
-        and the dataset has at least `min_gpu_rows` rows.
+        Numerical backend for discrete structure scores: 'numpy', 'cupy',
+        'cpp', or 'auto'. The 'cpp' option uses pgmpy's optional native CPU
+        extension and falls back to NumPy with a warning when it is unavailable.
+        The 'auto' option uses CuPy only when a CUDA device is available and the
+        dataset has at least `min_gpu_rows` rows.
     min_gpu_rows : int, (default : 50000)
         Minimum dataset size at which `compute_backend='auto'` attempts to use
         CuPy. Explicit `compute_backend='cupy'` always requests the GPU.
+    structure_score_methods : iterable, str, or None, (default : None)
+        Post-fit structure scores to compute. ``None`` preserves the historical
+        behavior and computes K2, BIC, BDeu, and BDs. Use ``"selected"`` to
+        compute only `scoretype`, or an empty iterable to skip this optional
+        reporting pass. Skipping it does not change the learned graph.
     verbose : int, (default : 3)
         0: None, 1: Error,  2: Warning, 3: Info (default), 4: Debug, 5: Trace
 
@@ -297,7 +305,7 @@ def fit(df,
 
     out = []
     # Set config
-    config = {'method': methodtype, 'scoring': scoretype, 'black_list': black_list, 'white_list': white_list, 'bw_list_method': bw_list_method, 'start_dag': start_dag, 'max_indegree': max_indegree, 'tabu_length': tabu_length, 'epsilon': epsilon, 'max_iter': max_iter, 'root_node': root_node, 'class_node': class_node, 'fixed_edges': fixed_edges, 'return_all_dags': return_all_dags, 'n_jobs': n_jobs, 'verbose': verbose, 'compute_backend': compute_backend, 'min_gpu_rows': min_gpu_rows}
+    config = {'method': methodtype, 'scoring': scoretype, 'black_list': black_list, 'white_list': white_list, 'bw_list_method': bw_list_method, 'start_dag': start_dag, 'max_indegree': max_indegree, 'tabu_length': tabu_length, 'epsilon': epsilon, 'max_iter': max_iter, 'root_node': root_node, 'class_node': class_node, 'fixed_edges': fixed_edges, 'return_all_dags': return_all_dags, 'n_jobs': n_jobs, 'verbose': verbose, 'compute_backend': compute_backend, 'min_gpu_rows': min_gpu_rows, 'structure_score_methods': structure_score_methods}
     # Make some checks
     config = _make_checks(df, config, verbose=verbose)
     # Make sure columns are of type string
@@ -370,14 +378,21 @@ def fit(df,
     # Store
     out['model_edges'] = list(out['model'].edges())
     out['adjmat'] = bnlearn.dag2adjmat(out['model'])
+    resolved_compute_backend = out.pop('_resolved_compute_backend', None)
+    if resolved_compute_backend is not None:
+        config['resolved_compute_backend'] = resolved_compute_backend
     out['config'] = config
-    out['structure_scores'] = bnlearn.structure_scores(
-        out,
-        df,
-        verbose=verbose,
-        compute_backend=config['compute_backend'],
-        min_gpu_rows=config['min_gpu_rows'],
-    )
+    if config['structure_score_methods']:
+        out['structure_scores'] = bnlearn.structure_scores(
+            out,
+            df,
+            scoring_method=config['structure_score_methods'],
+            verbose=verbose,
+            compute_backend=config['compute_backend'],
+            min_gpu_rows=config['min_gpu_rows'],
+        )
+    else:
+        out['structure_scores'] = {}
 
     # return
     return out
@@ -388,8 +403,36 @@ def _make_checks(df, config, verbose=3):
     assert isinstance(pd.DataFrame(), type(df)), 'df must be of type pd.DataFrame()'
     if not np.isin(config['scoring'], ['bic', 'k2', 'bdeu', 'bds', 'aic', 'loglik-g', 'aic-g', 'bic-g']): raise Exception('"scoretype=%s" is invalid.' %(config['scoring']))
     if not np.isin(config['method'], ['ica-lingam', 'direct-lingam', 'naivebayes', 'nb', 'tan', 'cl', 'chow-liu', 'hc', 'ex', 'cs', 'pc', 'exhaustivesearch', 'hillclimbsearch', 'constraintsearch']): raise Exception('"methodtype=%s" is invalid.' %(config['method']))
-    if config['compute_backend'] not in ['numpy', 'cupy', 'auto']: raise Exception('"compute_backend=%s" is invalid.' %(config['compute_backend']))
+    if config['compute_backend'] not in ['numpy', 'cupy', 'cpp', 'auto']:
+        raise ValueError(
+            'compute_backend must be one of: "numpy", "cupy", "cpp", or "auto". '
+            'Got: %r' % config['compute_backend']
+        )
     if not isinstance(config['min_gpu_rows'], int) or config['min_gpu_rows'] < 0: raise Exception('"min_gpu_rows=%s" is invalid.' %(config['min_gpu_rows']))
+
+    supported_structure_scores = {'bic', 'k2', 'bdeu', 'bds', 'aic', 'loglik-g', 'aic-g', 'bic-g'}
+    requested_structure_scores = config['structure_score_methods']
+    if requested_structure_scores is None:
+        requested_structure_scores = ['k2', 'bic', 'bdeu', 'bds']
+    elif isinstance(requested_structure_scores, str):
+        requested_structure_scores = (
+            [config['scoring']]
+            if requested_structure_scores == 'selected'
+            else [requested_structure_scores]
+        )
+    else:
+        try:
+            requested_structure_scores = list(requested_structure_scores)
+        except TypeError as exc:
+            raise ValueError('structure_score_methods must be None, "selected", a score name, or an iterable.') from exc
+
+    unknown_structure_scores = set(requested_structure_scores) - supported_structure_scores
+    if unknown_structure_scores:
+        raise ValueError(
+            'structure_score_methods contains unsupported score(s): '
+            f'{sorted(unknown_structure_scores)}'
+        )
+    config['structure_score_methods'] = requested_structure_scores
 
     if isinstance(config['white_list'], str):
         config['white_list'] = [config['white_list']]
@@ -693,11 +736,13 @@ def _hillclimbsearch(df,
         compute_backend=compute_backend,
         min_gpu_rows=min_gpu_rows,
     )
-    # Use CPU threads for independent candidate scores. CuPy already schedules
-    # work on the GPU and is faster without competing host threads.
-    effective_n_jobs = 1 if getattr(scoring_method, 'resolved_backend_', 'numpy') == 'cupy' else n_jobs
+    # CuPy schedules work on the GPU, while the C++ backend batches candidates
+    # internally. Both paths require a single host worker to avoid contention
+    # and, for C++, to activate pgmpy's batch-local-score implementation.
+    resolved_backend = getattr(scoring_method, 'resolved_backend_', 'numpy')
+    effective_n_jobs = 1 if resolved_backend in {'cupy', 'cpp'} else n_jobs
     if verbose >= 4 and effective_n_jobs != n_jobs:
-        print('[bnlearn] >Using n_jobs=1 with the CuPy backend to avoid GPU contention.')
+        print('[bnlearn] >Using n_jobs=1 with the %s backend.' % resolved_backend)
     if bw_list_method == 'edges' and ((black_list is not None) or (white_list is not None)):
         if verbose >= 3: print('[bnlearn] >Filter edges based on black_list/white_list')
 
@@ -720,6 +765,7 @@ def _hillclimbsearch(df,
 
     # Store
     out['model'] = best_model
+    out['_resolved_compute_backend'] = resolved_backend
     # Return
     return out
 
@@ -784,6 +830,9 @@ def _exhaustivesearch(
 
     # Store
     out['model'] = best_model
+    out['_resolved_compute_backend'] = getattr(
+        scoring_method, 'resolved_backend_', 'numpy'
+    )
 
     # Compute all possible DAGs
     if return_all_dags:
@@ -828,6 +877,10 @@ def _SetScoringType(
             * loglik-g
             * aic-g
             * bic-g
+    compute_backend : {'numpy', 'cupy', 'cpp', 'auto'}, default='numpy'
+        Numerical backend for discrete scores. ``cpp`` requests pgmpy's
+        optional native CPU extension and falls back to NumPy with a warning
+        if the extension is unavailable.
     verbose : int, (default : 3)
         0:None, 1:Error, 2:Warning, 3:Info (default), 4:Debug, 5:Trace
 

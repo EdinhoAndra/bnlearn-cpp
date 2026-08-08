@@ -1846,12 +1846,17 @@ def predict(model, df, variables, to_df=True, method='max', verbose=3):
 
     evidences = list(map(lambda x: dfU.iloc[x, :].to_dict(), range(dfU.shape[0])))
     dfU_shape = dfU.shape[1]
-    # for i in tqdm(range(dfU.shape[0])):
-    for evidence in tqdm(evidences):
+    queries = bnlearn.inference.query_many(
+        model,
+        variables=variables,
+        evidences=evidences,
+        to_df=False,
+        show_progress=False,
+        verbose=0,
+    )
+    for evidence, query in tqdm(zip(evidences, queries), total=len(evidences)):
         # Get input data and create a dict.
         # evidence = dfU.iloc[i, :].to_dict()
-        # Do the inference.
-        query = bnlearn.inference.fit(model, variables=variables, evidence=evidence, to_df=False, verbose=0)
         # Find original location of the input data.
         # loc = np.sum((dfX==dfU.iloc[i, :]).values, axis=1)==dfU_shape
         loc = np.sum(dfX.values==[*evidence.values()], axis=1)==dfU_shape
@@ -2120,7 +2125,15 @@ def _normalize_weights(weights, minscale=1, maxscale=5):
 
 
 # %% Compute structure scores.
-def structure_scores(model, df, scoring_method=['k2', 'bic', 'bdeu', 'bds'], verbose=3, **kwargs):
+def structure_scores(
+    model,
+    df,
+    scoring_method=['k2', 'bic', 'bdeu', 'bds'],
+    verbose=3,
+    compute_backend='numpy',
+    min_gpu_rows=50000,
+    **kwargs,
+):
     """Compute structure scores.
 
     Each model can be scored based on its structure. However, the score doesn't have very straight forward
@@ -2139,6 +2152,14 @@ def structure_scores(model, df, scoring_method=['k2', 'bic', 'bdeu', 'bds'], ver
     scoring_method: str ( k2 | bdeu | bds | bic )
         The following four scoring methods are supported currently: 1) K2Score
         2) BDeuScore 3) BDsScore 4) BicScore
+
+    compute_backend: str (numpy | cupy | cpp | auto)
+        Numerical backend for discrete scores. ``cpp`` uses pgmpy's optional
+        native CPU extension, with a warning and NumPy fallback when the
+        extension is unavailable.
+
+    min_gpu_rows: int, default=50000
+        Minimum row count at which ``compute_backend='auto'`` tries CuPy.
 
     kwargs: kwargs
         Any additional parameters parameters that needs to be passed to the
@@ -2167,6 +2188,16 @@ def structure_scores(model, df, scoring_method=['k2', 'bic', 'bdeu', 'bds'], ver
     >>> # Compute the structure score for as specific scoring-method.
     >>> bn.structure_scores(model, df, scoring_method="bic")
     """
+    if compute_backend not in {'numpy', 'cupy', 'cpp', 'auto'}:
+        raise ValueError(
+            'compute_backend must be one of: "numpy", "cupy", "cpp", or "auto". '
+            f'Got: {compute_backend!r}'
+        )
+    if not isinstance(min_gpu_rows, int) or min_gpu_rows < 0:
+        raise ValueError(
+            f'min_gpu_rows must be a non-negative integer. Got: {min_gpu_rows!r}'
+        )
+
     method = None
     selected_score = None
     show_message = True
@@ -2198,7 +2229,14 @@ def structure_scores(model, df, scoring_method=['k2', 'bic', 'bdeu', 'bds'], ver
     if model is not None:
         for s in scoring_method:
             try:
-                scoring_object = bnlearn.structure_learning._SetScoringType(df, s, verbose=0, **kwargs)
+                scoring_object = bnlearn.structure_learning._SetScoringType(
+                    df,
+                    s,
+                    verbose=0,
+                    compute_backend=compute_backend,
+                    min_gpu_rows=min_gpu_rows,
+                    **kwargs,
+                )
                 scores[s] = scoring_object.score(model)
             except (ValueError, TypeError, np.linalg.LinAlgError) as e:
                 if verbose>=2 and show_message:

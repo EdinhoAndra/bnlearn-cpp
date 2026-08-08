@@ -78,19 +78,20 @@ Each approach can be scored using the following scoretypes:
     * k2
     * bdeu
 
-GPU acceleration and CPU parallelism
-====================================
+Discrete score acceleration and CPU parallelism
+================================================
 
 The discrete ``bic``, ``k2``, ``bdeu``, ``bds``, and ``aic`` scores support
-vectorized NumPy and CuPy backends supplied natively by the pinned custom
-``EdinhoAndra/pgmpy`` fork. Install the CUDA 12 extra when using a GPU:
+vectorized NumPy, CuPy, and native C++ CPU backends supplied by the pinned
+custom ``EdinhoAndra/pgmpy`` fork. Install the CUDA 12 extra when using a GPU:
 
 .. code-block:: bash
 
     pip install "bnlearn[gpu-cu12] @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
 
 Use ``compute_backend='auto'`` for a safe GPU selection with automatic NumPy
-fallback, or ``compute_backend='cupy'`` to require CUDA explicitly:
+fallback, ``compute_backend='cupy'`` to require CUDA explicitly, or
+``compute_backend='cpp'`` to request the optional C++17 CPU extension:
 
 .. code-block:: python
 
@@ -103,9 +104,27 @@ fallback, or ``compute_backend='cupy'`` to require CUDA explicitly:
         n_jobs=-1,
     )
 
+    model_cpp = bn.structure_learning.fit(
+        df,
+        methodtype='hc',
+        scoretype='bic',
+        compute_backend='cpp',
+        n_jobs=-1,
+    )
+
+The C++ extension is attempted during a normal source installation of the
+custom pgmpy fork. If it could not be built, an explicit ``cpp`` request emits
+a ``RuntimeWarning`` and uses NumPy instead. The score object's
+``resolved_backend_`` records the backend actually selected.
+For ``structure_learning.fit``, the same value is copied to
+``model_cpp['config']['resolved_compute_backend']`` so benchmark reports can
+distinguish native execution from a NumPy fallback.
+
 Hill Climb candidate scores use ``n_jobs`` CPU threads with the NumPy backend.
 The CuPy backend uses one host thread so that CUDA kernels are scheduled without
-thread contention.
+thread contention. The C++ backend also uses one host thread because pgmpy
+batches candidate local scores inside the native implementation. If C++ falls
+back to NumPy, the originally requested ``n_jobs`` value is retained.
 
 The Hill Climb implementation also uses the canonical
 ``pgmpy.causal_discovery.HillClimbSearch`` and ``ExpertKnowledge`` APIs. The

@@ -77,6 +77,35 @@ The highest probability is that in these condition, there is wet grass and no ra
   +--------------+---------+-----------------------+
 
 
+Batch inference
+^^^^^^^^^^^^^^^^^^^
+
+For repeated queries on the same fitted model, compile the inference engine
+once and pass the evidence configurations to ``query_many``. Results retain
+the input order and use the same pgmpy factor representation as
+``bn.inference.fit(..., to_df=False)``.
+
+.. code-block:: python
+
+   engine = bn.inference.compile(model)
+   evidences = [
+       {'Rain': 1, 'Sprinkler': 0, 'Cloudy': 1},
+       {'Rain': 0, 'Sprinkler': 1, 'Cloudy': 0},
+   ]
+   queries = engine.query_many(['Wet_Grass'], evidences)
+
+   # The module-level wrapper also accepts a compiled engine.
+   frames = bn.inference.query_many(
+       engine, ['Wet_Grass'], evidences, to_df=True, verbose=0
+   )
+   first_result = frames[0].df
+
+When one target is queried and every direct parent is observed, the engine can
+answer eligible rows by an exact vectorized CPD lookup. Rows with missing
+parents or observed descendants automatically use the compiled variable
+elimination fallback. Recompile after changing the graph or its CPDs.
+
+
 Example (3)
 ^^^^^^^^^^^^^^^^^^^
 
