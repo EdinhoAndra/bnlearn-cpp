@@ -58,11 +58,11 @@ Yes! This library is entirely free but it runs on `coffee <https://buymeacoffee.
 
 .. note::
 	**Your ❤️ is important to keep maintaining this package.** You can `support <https://erdogant.github.io/bnlearn/pages/html/Documentation.html>`_ in various ways, have a look at the `sponser page <https://github.com/sponsors/erdogant>`_.
-	Report custom-fork bugs, issues and feature requests at the `EdinhoAndra/bnlearn GitHub repository <https://github.com/EdinhoAndra/bnlearn/>`_.
+	Report custom-fork bugs, issues and feature requests at the `EdinhoAndra/bnlearn-cpp GitHub repository <https://github.com/EdinhoAndra/bnlearn-cpp/>`_.
 
 	.. code-block:: console
 
-	   pip install "bnlearn @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
+	   pip install "bnlearn @ git+https://github.com/EdinhoAndra/bnlearn-cpp.git"
 
 -----------------------------------
 

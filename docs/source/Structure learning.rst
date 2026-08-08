@@ -82,16 +82,19 @@ Discrete score acceleration and CPU parallelism
 ================================================
 
 The discrete ``bic``, ``k2``, ``bdeu``, ``bds``, and ``aic`` scores support
-vectorized NumPy, CuPy, and native C++ CPU backends supplied by the pinned
-custom ``EdinhoAndra/pgmpy`` fork. Install the CUDA 12 extra when using a GPU:
+vectorized NumPy, CuPy, and native C++ CPU backends supplied by
+``EdinhoAndra/pgmpy-cpp``. BIC and AIC also support the batched CUDA C++
+backend. Install the CUDA 12 extra when using a GPU:
 
 .. code-block:: bash
 
-    pip install "bnlearn[gpu-cu12] @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
+    pip install "bnlearn[gpu-cu12] @ git+https://github.com/EdinhoAndra/bnlearn-cpp.git@master"
 
 Use ``compute_backend='auto'`` for a safe GPU selection with automatic NumPy
 fallback, ``compute_backend='cupy'`` to require CUDA explicitly, or
-``compute_backend='cpp'`` to request the optional C++17 CPU extension:
+``compute_backend='cpp'`` to request the optional C++17 CPU extension.
+For BIC or AIC, ``compute_backend='cuda_fused'`` runs the candidate-family
+batch through the runtime-compiled CUDA C++ kernel:
 
 .. code-block:: python
 
@@ -112,6 +115,15 @@ fallback, ``compute_backend='cupy'`` to require CUDA explicitly, or
         n_jobs=-1,
     )
 
+    model_cuda = bn.structure_learning.fit(
+        df,
+        methodtype='hc',
+        scoretype='bic',
+        compute_backend='cuda_fused',
+        n_jobs=1,
+        structure_score_methods='selected',
+    )
+
 The C++ extension is attempted during a normal source installation of the
 custom pgmpy fork. If it could not be built, an explicit ``cpp`` request emits
 a ``RuntimeWarning`` and uses NumPy instead. The score object's
@@ -125,6 +137,12 @@ The CuPy backend uses one host thread so that CUDA kernels are scheduled without
 thread contention. The C++ backend also uses one host thread because pgmpy
 batches candidate local scores inside the native implementation. If C++ falls
 back to NumPy, the originally requested ``n_jobs`` value is retained.
+
+The ``cuda_fused`` backend keeps encoded data resident on the GPU, evaluates a
+batch of parent families in one CUDA C++ kernel, and copies back one score
+vector. Families above the shared-memory limit use CuPy on the same arrays.
+K2, BDeu, and BDs post-fit diagnostics use CuPy when the search backend is
+``cuda_fused``; their values and formulas are unchanged.
 
 The Hill Climb implementation also uses the canonical
 ``pgmpy.causal_discovery.HillClimbSearch`` and ``ExpertKnowledge`` APIs. The

@@ -101,16 +101,21 @@ Python 3.10 or newer is required.
 
 ##### Install the EdinhoAndra custom fork
 ```bash
-pip install "bnlearn @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
+pip install "bnlearn @ git+https://github.com/EdinhoAndra/bnlearn-cpp.git@master"
 ```
-The custom `pgmpy` dependency is pinned by commit in `pyproject.toml`; do not
-install the PyPI versions of `bnlearn` or `pgmpy` into the same environment.
+The package metadata installs `pgmpy` exclusively from
+`https://github.com/EdinhoAndra/pgmpy-cpp.git`; do not install the PyPI versions
+of `bnlearn` or `pgmpy` into the same environment.
 
 For a CUDA 12 GPU:
 
 ```bash
-pip install "bnlearn[gpu-cu12] @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
+pip install "bnlearn[gpu-cu12] @ git+https://github.com/EdinhoAndra/bnlearn-cpp.git@master"
 ```
+The GPU extra installs CuPy together with the CUDA 12 runtime components and
+headers required by the runtime-compiled CUDA C++ kernel; a compatible NVIDIA
+driver is still required.
+
 ##### Run the tests from a source checkout
 ```bash
 pip install -e ".[dev]"

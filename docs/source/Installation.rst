@@ -4,20 +4,25 @@ Installation
 Install the custom forks
 ------------------------
 
-Install the ``EdinhoAndra/bnlearn`` fork directly from GitHub:
+Install the ``EdinhoAndra/bnlearn-cpp`` fork directly from GitHub:
 
 .. code-block:: console
 
-    pip install "bnlearn @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
+    pip install "bnlearn @ git+https://github.com/EdinhoAndra/bnlearn-cpp.git@master"
 
 For CUDA 12, install its GPU extra:
 
 .. code-block:: console
 
-    pip install "bnlearn[gpu-cu12] @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
+    pip install "bnlearn[gpu-cu12] @ git+https://github.com/EdinhoAndra/bnlearn-cpp.git@master"
 
-The package metadata pins the compatible ``EdinhoAndra/pgmpy`` commit. Do not
-install the PyPI versions of ``bnlearn`` or ``pgmpy`` into the same environment.
+The GPU extra includes CuPy and the CUDA 12 runtime components and headers
+needed by the runtime-compiled CUDA C++ kernel. A compatible NVIDIA driver is
+still required.
+
+The package metadata installs ``pgmpy`` exclusively from
+``https://github.com/EdinhoAndra/pgmpy-cpp.git``. Do not install the PyPI
+versions of ``bnlearn`` or ``pgmpy`` into the same environment.
 
 Create Environment
 ------------------

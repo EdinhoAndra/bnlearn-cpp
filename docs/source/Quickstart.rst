@@ -10,16 +10,20 @@ environment and install the custom fork directly from GitHub.
 
    conda create -n env_bnlearn python=3.13
    conda activate env_bnlearn
-   pip install "bnlearn @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
+   pip install "bnlearn @ git+https://github.com/EdinhoAndra/bnlearn-cpp.git"
 
 For a CUDA 12 GPU, install the optional GPU extra instead:
 
 .. code-block:: console
 
-   pip install "bnlearn[gpu-cu12] @ git+https://github.com/EdinhoAndra/bnlearn.git@master"
+   pip install "bnlearn[gpu-cu12] @ git+https://github.com/EdinhoAndra/bnlearn-cpp.git"
 
-The compatible custom ``pgmpy`` commit is installed automatically from the
-dependency pin in ``pyproject.toml``.
+This extra installs CuPy together with the CUDA 12 runtime components and
+headers required by the runtime-compiled CUDA C++ kernel. A compatible NVIDIA
+driver is still required.
+
+The compatible custom ``pgmpy-cpp`` repository is installed automatically from
+the exclusive dependency URL in ``pyproject.toml``.
 
 Quick Examples
 ========================

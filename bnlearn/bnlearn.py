@@ -2153,10 +2153,11 @@ def structure_scores(
         The following four scoring methods are supported currently: 1) K2Score
         2) BDeuScore 3) BDsScore 4) BicScore
 
-    compute_backend: str (numpy | cupy | cpp | auto)
+    compute_backend: str (numpy | cupy | cuda_fused | cpp | auto)
         Numerical backend for discrete scores. ``cpp`` uses pgmpy's optional
         native CPU extension, with a warning and NumPy fallback when the
-        extension is unavailable.
+        extension is unavailable. ``cuda_fused`` uses the batched CUDA C++
+        kernel for BIC and AIC; other diagnostic scores use CuPy.
 
     min_gpu_rows: int, default=50000
         Minimum row count at which ``compute_backend='auto'`` tries CuPy.
@@ -2188,9 +2189,9 @@ def structure_scores(
     >>> # Compute the structure score for as specific scoring-method.
     >>> bn.structure_scores(model, df, scoring_method="bic")
     """
-    if compute_backend not in {'numpy', 'cupy', 'cpp', 'auto'}:
+    if compute_backend not in {'numpy', 'cupy', 'cuda_fused', 'cpp', 'auto'}:
         raise ValueError(
-            'compute_backend must be one of: "numpy", "cupy", "cpp", or "auto". '
+            'compute_backend must be one of: "numpy", "cupy", "cuda_fused", "cpp", or "auto". '
             f'Got: {compute_backend!r}'
         )
     if not isinstance(min_gpu_rows, int) or min_gpu_rows < 0:
@@ -2229,11 +2230,16 @@ def structure_scores(
     if model is not None:
         for s in scoring_method:
             try:
+                score_backend = (
+                    'cupy'
+                    if compute_backend == 'cuda_fused' and s not in {'bic', 'aic'}
+                    else compute_backend
+                )
                 scoring_object = bnlearn.structure_learning._SetScoringType(
                     df,
                     s,
                     verbose=0,
-                    compute_backend=compute_backend,
+                    compute_backend=score_backend,
                     min_gpu_rows=min_gpu_rows,
                     **kwargs,
                 )

@@ -94,13 +94,13 @@ import pgmpy
 if version.parse(pgmpy.__version__) < version.parse("1.1.2"):
     raise ImportError(
         '[bnlearn] >Error: This release requires the custom pgmpy fork at '
-        'EdinhoAndra/pgmpy commit a2ddea21b36b0209ed5295f55a450d5f78acc709.'
+        'https://github.com/EdinhoAndra/pgmpy-cpp.git.'
     )
 if 'compute_backend' not in signature(structure_learning.BIC).parameters:
     raise ImportError(
         '[bnlearn] >Error: The installed pgmpy does not provide the custom '
-        'NumPy/CuPy score backend. Install EdinhoAndra/pgmpy commit '
-        'a2ddea21b36b0209ed5295f55a450d5f78acc709.'
+        'accelerated score backends. Install '
+        'https://github.com/EdinhoAndra/pgmpy-cpp.git.'
     )
 
 # Version check

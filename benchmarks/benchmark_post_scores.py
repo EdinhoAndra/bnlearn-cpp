@@ -14,9 +14,10 @@ import statistics
 import time
 from pathlib import Path
 
-import bnlearn as bn
 import numpy as np
 import pandas as pd
+
+import bnlearn as bn
 
 
 def make_frame(rows: int, features: int, seed: int) -> pd.DataFrame:
@@ -134,7 +135,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=20260808)
     parser.add_argument("--max-iter", type=int, default=50)
     parser.add_argument("--repeats", type=int, default=5)
-    parser.add_argument("--backend", choices=("numpy", "cupy", "auto"), default="numpy")
+    parser.add_argument(
+        "--backend",
+        choices=("numpy", "cupy", "cuda_fused", "cpp", "auto"),
+        default="numpy",
+    )
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
 

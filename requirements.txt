@@ -1,4 +1,4 @@
-pgmpy @ git+https://github.com/EdinhoAndra/pgmpy.git@a2ddea21b36b0209ed5295f55a450d5f78acc709
+pgmpy @ git+https://github.com/EdinhoAndra/pgmpy-cpp.git
 networkx>=2.7.1
 matplotlib>=3.3.4
 numpy>=1.24.1

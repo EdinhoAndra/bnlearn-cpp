@@ -216,10 +216,11 @@ def fit(df,
         * 'alpha': 0.05
     compute_backend : str, (default : 'numpy')
         Numerical backend for discrete structure scores: 'numpy', 'cupy',
-        'cpp', or 'auto'. The 'cpp' option uses pgmpy's optional native CPU
-        extension and falls back to NumPy with a warning when it is unavailable.
-        The 'auto' option uses CuPy only when a CUDA device is available and the
-        dataset has at least `min_gpu_rows` rows.
+        'cuda_fused', 'cpp', or 'auto'. The 'cuda_fused' option runs BIC or AIC
+        candidate batches in pgmpy's CUDA C++ kernel. The 'cpp' option uses the
+        optional native CPU extension and falls back to NumPy with a warning.
+        The 'auto' option uses CuPy only when a CUDA device is available and
+        the dataset has at least `min_gpu_rows` rows.
     min_gpu_rows : int, (default : 50000)
         Minimum dataset size at which `compute_backend='auto'` attempts to use
         CuPy. Explicit `compute_backend='cupy'` always requests the GPU.
@@ -227,7 +228,8 @@ def fit(df,
         Post-fit structure scores to compute. ``None`` preserves the historical
         behavior and computes K2, BIC, BDeu, and BDs. Use ``"selected"`` to
         compute only `scoretype`, or an empty iterable to skip this optional
-        reporting pass. Skipping it does not change the learned graph.
+        reporting pass. With ``cuda_fused``, incompatible diagnostic formulas
+        use CuPy. Skipping this pass does not change the learned graph.
     verbose : int, (default : 3)
         0: None, 1: Error,  2: Warning, 3: Info (default), 4: Debug, 5: Trace
 
@@ -403,10 +405,14 @@ def _make_checks(df, config, verbose=3):
     assert isinstance(pd.DataFrame(), type(df)), 'df must be of type pd.DataFrame()'
     if not np.isin(config['scoring'], ['bic', 'k2', 'bdeu', 'bds', 'aic', 'loglik-g', 'aic-g', 'bic-g']): raise Exception('"scoretype=%s" is invalid.' %(config['scoring']))
     if not np.isin(config['method'], ['ica-lingam', 'direct-lingam', 'naivebayes', 'nb', 'tan', 'cl', 'chow-liu', 'hc', 'ex', 'cs', 'pc', 'exhaustivesearch', 'hillclimbsearch', 'constraintsearch']): raise Exception('"methodtype=%s" is invalid.' %(config['method']))
-    if config['compute_backend'] not in ['numpy', 'cupy', 'cpp', 'auto']:
+    if config['compute_backend'] not in ['numpy', 'cupy', 'cuda_fused', 'cpp', 'auto']:
         raise ValueError(
-            'compute_backend must be one of: "numpy", "cupy", "cpp", or "auto". '
+            'compute_backend must be one of: "numpy", "cupy", "cuda_fused", "cpp", or "auto". '
             'Got: %r' % config['compute_backend']
+        )
+    if config['compute_backend'] == 'cuda_fused' and config['scoring'] not in ['bic', 'aic']:
+        raise ValueError(
+            'compute_backend="cuda_fused" supports scoretype="bic" and scoretype="aic" only.'
         )
     if not isinstance(config['min_gpu_rows'], int) or config['min_gpu_rows'] < 0: raise Exception('"min_gpu_rows=%s" is invalid.' %(config['min_gpu_rows']))
 
@@ -736,11 +742,10 @@ def _hillclimbsearch(df,
         compute_backend=compute_backend,
         min_gpu_rows=min_gpu_rows,
     )
-    # CuPy schedules work on the GPU, while the C++ backend batches candidates
-    # internally. Both paths require a single host worker to avoid contention
-    # and, for C++, to activate pgmpy's batch-local-score implementation.
+    # GPU backends schedule work on one CUDA stream, while the C++ backend
+    # batches candidates internally. These paths require one host worker.
     resolved_backend = getattr(scoring_method, 'resolved_backend_', 'numpy')
-    effective_n_jobs = 1 if resolved_backend in {'cupy', 'cpp'} else n_jobs
+    effective_n_jobs = 1 if resolved_backend in {'cupy', 'cuda_fused', 'cpp'} else n_jobs
     if verbose >= 4 and effective_n_jobs != n_jobs:
         print('[bnlearn] >Using n_jobs=1 with the %s backend.' % resolved_backend)
     if bw_list_method == 'edges' and ((black_list is not None) or (white_list is not None)):
@@ -877,10 +882,10 @@ def _SetScoringType(
             * loglik-g
             * aic-g
             * bic-g
-    compute_backend : {'numpy', 'cupy', 'cpp', 'auto'}, default='numpy'
-        Numerical backend for discrete scores. ``cpp`` requests pgmpy's
-        optional native CPU extension and falls back to NumPy with a warning
-        if the extension is unavailable.
+    compute_backend : {'numpy', 'cupy', 'cuda_fused', 'cpp', 'auto'}, default='numpy'
+        Numerical backend for discrete scores. ``cuda_fused`` uses pgmpy's
+        batched CUDA C++ kernel for BIC and AIC. ``cpp`` requests pgmpy's
+        optional native CPU extension and falls back to NumPy with a warning.
     verbose : int, (default : 3)
         0:None, 1:Error, 2:Warning, 3:Info (default), 4:Debug, 5:Trace
 
