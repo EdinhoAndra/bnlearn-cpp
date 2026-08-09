@@ -23,7 +23,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "pgmpy @ git+https://github.com/EdinhoAndra/pgmpy-cpp.git",
+    "pgmpy @ git+https://github.com/EdinhoAndra/pgmpy-cpp.git@1ae8051ed8c86211e43fe6d32cccd329831c26c9",
     "networkx>=2.7.1",
     "matplotlib>=3.3.4",
     "numpy>=1.24.1",
