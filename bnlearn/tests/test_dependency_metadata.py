@@ -3,7 +3,7 @@ from pathlib import Path
 import tomllib
 
 
-PGMPY_CPP_REQUIREMENT = "pgmpy @ git+https://github.com/EdinhoAndra/pgmpy-cpp.git"
+PGMPY_CPP_REQUIREMENT = "pgmpy @ git+https://github.com/EdinhoAndra/pgmpy-cpp.git@1ae8051ed8c86211e43fe6d32cccd329831c26c9"
 
 
 def test_pgmpy_dependency_points_exclusively_to_pgmpy_cpp():
